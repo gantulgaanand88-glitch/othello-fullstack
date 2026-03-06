@@ -13,6 +13,16 @@ const AUTH_STORAGE_KEY = 'othello-auth';
 
 type AuthMode = 'login' | 'register';
 
+function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    // Expired if less than 60 seconds remaining
+    return payload.exp * 1000 < Date.now() + 60_000;
+  } catch {
+    return true;
+  }
+}
+
 interface AuthModalState {
   isOpen: boolean;
   mode: AuthMode;
@@ -189,6 +199,12 @@ function App() {
 
     try {
       const parsed = JSON.parse(stored) as StoredAuth;
+
+      if (isTokenExpired(parsed.token)) {
+        window.localStorage.removeItem(AUTH_STORAGE_KEY);
+        return;
+      }
+
       setAuth(parsed);
       setAuthToken(parsed.token);
     } catch {

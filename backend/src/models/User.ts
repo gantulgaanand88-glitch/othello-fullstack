@@ -78,4 +78,7 @@ userSchema.methods.comparePassword = function comparePassword(password: string):
   return bcrypt.compare(password, this.passwordHash);
 };
 
+// Index for leaderboard sorting
+userSchema.index({ rating: -1, wins: -1, username: 1 });
+
 export const User = model<IUser, UserModel>('User', userSchema);

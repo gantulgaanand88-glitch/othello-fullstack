@@ -9,10 +9,17 @@ interface SquareProps {
 }
 
 export function Square({ cell, isLegalMove, isLastMove, isFlipped, onClick }: SquareProps) {
+  const label = cell
+    ? `${cell} piece`
+    : isLegalMove
+      ? 'Legal move'
+      : 'Empty square';
+
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-label={label}
       className={[
         'relative aspect-square w-full overflow-hidden border border-black/20 bg-[#2d5a27] transition-colors duration-200 hover:bg-[#35692e]',
         isLastMove ? 'ring-2 ring-inset ring-yellow-400' : '',

@@ -19,10 +19,8 @@ router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res) => {
 
     res.json(game);
   } catch (error) {
-    res.status(500).json({
-      message: 'Failed to load game.',
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
+    console.error('Load game error:', error);
+    res.status(500).json({ message: 'Failed to load game.' });
   }
 });
 

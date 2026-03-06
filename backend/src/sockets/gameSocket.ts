@@ -56,6 +56,9 @@ interface SocketWithUser extends Socket {
 const MATCH_RANGE_INITIAL = 150;
 const MATCH_RANGE_EXPANDED = 300;
 const RANGE_EXPAND_AFTER_MS = 10_000;
+const STALE_GAME_CLEANUP_MS = 30 * 60_000; // 30 minutes
+const STALE_ROOM_CLEANUP_MS = 15 * 60_000; // 15 minutes
+const CLEANUP_INTERVAL_MS = 60_000; // Run cleanup every minute
 
 export const matchmakingQueue: QueueEntry[] = [];
 export const activeGames = new Map<string, ActiveGame>();
@@ -403,6 +406,27 @@ async function finishGame(
 }
 
 export function initializeGameSocket(io: Server): void {
+  // Periodic cleanup of stale finished games and abandoned rooms
+  setInterval(() => {
+    const now = Date.now();
+
+    // Remove finished/abandoned games older than 30 minutes
+    for (const [gameId, game] of activeGames) {
+      if (game.status !== 'active') {
+        activeGames.delete(gameId);
+      }
+    }
+
+    // Remove stale custom rooms older than 15 minutes
+    for (const [code, room] of customRooms) {
+      if (now - room.createdAt > STALE_ROOM_CLEANUP_MS) {
+        customRooms.delete(code);
+        const hostSocket = io.sockets.sockets.get(room.host.socketId);
+        hostSocket?.emit('roomCancelled');
+      }
+    }
+  }, CLEANUP_INTERVAL_MS);
+
   io.on('connection', (socket: Socket) => {
     const typedSocket = socket as SocketWithUser;
 

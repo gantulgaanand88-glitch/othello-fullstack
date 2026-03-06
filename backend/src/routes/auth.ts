@@ -8,6 +8,9 @@ import { getPlayerRank } from '../utils/elo';
 
 const router = Router();
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const USERNAME_REGEX = /^[a-zA-Z0-9_-]+$/;
+
 router.post('/guest', (_req, res) => {
   const guestId = `guest_${crypto.randomBytes(8).toString('hex')}`;
   const guestNumber = Math.floor(1000 + Math.random() * 9000);
@@ -45,13 +48,36 @@ router.post('/register', async (req, res) => {
       return;
     }
 
+    const trimmedUsername = username.trim();
+    const trimmedEmail = email.trim().toLowerCase();
+
+    if (trimmedUsername.length < 3 || trimmedUsername.length > 20) {
+      res.status(400).json({ message: 'Username must be 3–20 characters.' });
+      return;
+    }
+
+    if (!USERNAME_REGEX.test(trimmedUsername)) {
+      res.status(400).json({ message: 'Username may only contain letters, numbers, hyphens, and underscores.' });
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      res.status(400).json({ message: 'Please provide a valid email address.' });
+      return;
+    }
+
     if (password.length < 6) {
       res.status(400).json({ message: 'Password must be at least 6 characters long.' });
       return;
     }
 
+    if (password.length > 128) {
+      res.status(400).json({ message: 'Password must not exceed 128 characters.' });
+      return;
+    }
+
     const existingUser = await User.findOne({
-      $or: [{ email: email.toLowerCase() }, { username }],
+      $or: [{ email: trimmedEmail }, { username: trimmedUsername }],
     }).lean();
 
     if (existingUser) {
@@ -61,8 +87,8 @@ router.post('/register', async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 12);
     const user = await User.create({
-      username,
-      email: email.toLowerCase(),
+      username: trimmedUsername,
+      email: trimmedEmail,
       passwordHash,
     });
 
@@ -83,10 +109,8 @@ router.post('/register', async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({
-      message: 'Failed to register user.',
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
+    console.error('Register error:', error);
+    res.status(500).json({ message: 'Failed to register user.' });
   }
 });
 
@@ -133,10 +157,8 @@ router.post('/login', async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({
-      message: 'Failed to log in.',
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
+    console.error('Login error:', error);
+    res.status(500).json({ message: 'Failed to log in.' });
   }
 });
 

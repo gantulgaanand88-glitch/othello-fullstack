@@ -27,10 +27,8 @@ router.get('/', async (_req, res) => {
       })),
     );
   } catch (error) {
-    res.status(500).json({
-      message: 'Failed to load leaderboard.',
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
+    console.error('Leaderboard error:', error);
+    res.status(500).json({ message: 'Failed to load leaderboard.' });
   }
 });
 

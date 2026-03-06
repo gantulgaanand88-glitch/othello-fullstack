@@ -29,7 +29,11 @@ export function GameBoard({ state, yourColor, lastMove, flipped, onSquareClick }
         <span>{state.currentPlayer} to move</span>
       </div>
 
-      <div className="grid grid-cols-8 overflow-hidden rounded-2xl border border-black/20">
+      <div
+        role="grid"
+        aria-label="Othello game board"
+        className="grid grid-cols-8 overflow-hidden rounded-2xl border border-black/20"
+      >
         {state.board.map((rowCells, rowIndex) =>
           rowCells.map((cell, colIndex) => {
             const key = coordinateKey(rowIndex, colIndex);

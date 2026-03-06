@@ -119,5 +119,10 @@ export interface IGame {
   updatedAt: Date;
 }
 
+// Indexes for common queries
+gameSchema.index({ blackPlayer: 1, createdAt: -1 });
+gameSchema.index({ whitePlayer: 1, createdAt: -1 });
+gameSchema.index({ status: 1 });
+
 export const Game = model<IGame>('Game', gameSchema);
 
