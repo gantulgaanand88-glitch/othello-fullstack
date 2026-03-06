@@ -5,12 +5,10 @@ interface SquareProps {
   isLegalMove: boolean;
   isLastMove: boolean;
   isFlipped: boolean;
-  isPlaced: boolean;
-  flipDelay: number;
   onClick: () => void;
 }
 
-export function Square({ cell, isLegalMove, isLastMove, isFlipped, isPlaced, flipDelay, onClick }: SquareProps) {
+export function Square({ cell, isLegalMove, isLastMove, isFlipped, onClick }: SquareProps) {
   const label = cell
     ? `${cell} piece`
     : isLegalMove
@@ -23,32 +21,24 @@ export function Square({ cell, isLegalMove, isLastMove, isFlipped, isPlaced, fli
       onClick={onClick}
       aria-label={label}
       className={[
-        'board-square relative aspect-square w-full overflow-hidden border border-black/10',
-        isLastMove ? 'ring-2 ring-inset ring-yellow-400/80' : '',
+        'relative aspect-square w-full overflow-hidden border border-black/20 bg-[#2d5a27] transition-colors duration-200 hover:bg-[#35692e]',
+        isLastMove ? 'ring-2 ring-inset ring-yellow-400' : '',
       ].join(' ')}
     >
-      {/* Subtle grid texture */}
-      <span className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/[0.04] to-transparent" />
-
       {isLegalMove && !cell ? (
         <span className="absolute inset-0 flex items-center justify-center">
-          <span className="h-3 w-3 rounded-full bg-white/30 shadow-[0_0_6px_rgba(255,255,255,0.15)] transition-transform duration-200 hover:scale-125" />
+          <span className="h-3 w-3 rounded-full bg-white/35" />
         </span>
       ) : null}
 
       {cell ? (
-        <span
-          className="absolute inset-0 flex items-center justify-center"
-          style={{ perspective: '200px' }}
-        >
+        <span className="absolute inset-0 flex items-center justify-center">
           <span
             className={[
-              'piece-disc h-[72%] w-[72%] rounded-full',
-              cell === 'black' ? 'piece-black' : 'piece-white',
-              isPlaced ? 'animate-piece-place' : '',
-              isFlipped ? 'animate-piece-wave-flip' : '',
+              'h-[72%] w-[72%] rounded-full shadow-lg',
+              cell === 'black' ? 'bg-zinc-950' : 'bg-gray-100',
+              isFlipped ? 'animate-piece-flip' : '',
             ].join(' ')}
-            style={isFlipped ? { animationDelay: `${flipDelay}ms` } : undefined}
           />
         </span>
       ) : null}
