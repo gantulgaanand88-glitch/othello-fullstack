@@ -1,0 +1,41 @@
+# Render Blueprint — deploy both services from one repo
+# Docs: https://docs.render.com/infrastructure-as-code
+
+services:
+  # ── Backend (Web Service) ──────────────────────────────
+  - type: web
+    name: othello-api
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"            # Render recommends 10000
+      - key: MONGODB_URI
+        sync: false               # you'll set this in the dashboard
+      - key: JWT_SECRET
+        generateValue: true       # Render auto-generates a random secret
+      - key: CLIENT_URL
+        sync: false               # set to your static site URL after first deploy
+
+  # ── Frontend (Static Site) ─────────────────────────────
+  - type: web
+    name: othello-app
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html  # SPA client-side routing
+    envVars:
+      - key: VITE_API_URL
+        sync: false               # set to https://othello-api.onrender.com/api
+      - key: VITE_SOCKET_URL
+        sync: false               # set to https://othello-api.onrender.com
