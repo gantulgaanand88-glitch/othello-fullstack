@@ -5,10 +5,11 @@ interface SquareProps {
   isLegalMove: boolean;
   isLastMove: boolean;
   isFlipped: boolean;
+  flipDelay: number;
   onClick: () => void;
 }
 
-export function Square({ cell, isLegalMove, isLastMove, isFlipped, onClick }: SquareProps) {
+export function Square({ cell, isLegalMove, isLastMove, isFlipped, flipDelay, onClick }: SquareProps) {
   const label = cell
     ? `${cell} piece`
     : isLegalMove
@@ -39,6 +40,7 @@ export function Square({ cell, isLegalMove, isLastMove, isFlipped, onClick }: Sq
               cell === 'black' ? 'bg-zinc-950' : 'bg-gray-100',
               isFlipped ? 'animate-piece-flip' : '',
             ].join(' ')}
+            style={isFlipped && flipDelay > 0 ? { animationDelay: `${flipDelay}ms` } : undefined}
           />
         </span>
       ) : null}
