@@ -11,17 +11,19 @@ export default {
         board: '0 24px 48px rgba(0, 0, 0, 0.35)',
       },
       animation: {
-        'piece-flip': 'pieceFlip 500ms ease-in-out',
+        'piece-flip-3d': 'pieceFlip3d 600ms ease-in-out',
         'pulse-soft': 'pulseSoft 1.2s ease-in-out infinite',
         'fade-in-up': 'fadeInUp 400ms ease-out forwards',
         'slide-down': 'slideDown 300ms ease-out forwards',
         'toast': 'toastIn 300ms ease-out forwards, toastOut 300ms ease-in 1.7s forwards',
       },
       keyframes: {
-        pieceFlip: {
-          '0%': { transform: 'scaleX(1)' },
-          '50%': { transform: 'scaleX(0)' },
-          '100%': { transform: 'scaleX(1)' },
+        pieceFlip3d: {
+          '0%': { transform: 'rotateY(0deg) scale(1)' },
+          '35%': { transform: 'rotateY(90deg) scale(1.08)' },
+          '50%': { transform: 'rotateY(90deg) scale(1.1)' },
+          '65%': { transform: 'rotateY(180deg) scale(1.08)' },
+          '100%': { transform: 'rotateY(180deg) scale(1)' },
         },
         pulseSoft: {
           '0%, 100%': { transform: 'scale(1)', opacity: '1' },

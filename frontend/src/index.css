@@ -39,8 +39,9 @@ body {
 }
 
 @layer utilities {
-  .animate-piece-flip {
-    animation: pieceFlip 500ms ease-in-out;
+  .animate-piece-flip-3d {
+    animation: pieceFlip3d 600ms ease-in-out;
+    transform-style: preserve-3d;
   }
 
   .animate-pulse-soft {
@@ -60,15 +61,21 @@ body {
   }
 }
 
-@keyframes pieceFlip {
+@keyframes pieceFlip3d {
   0% {
-    transform: scaleX(1);
+    transform: rotateY(0deg) scale(1);
+  }
+  35% {
+    transform: rotateY(90deg) scale(1.08);
   }
   50% {
-    transform: scaleX(0);
+    transform: rotateY(90deg) scale(1.1);
+  }
+  65% {
+    transform: rotateY(180deg) scale(1.08);
   }
   100% {
-    transform: scaleX(1);
+    transform: rotateY(180deg) scale(1);
   }
 }
 
