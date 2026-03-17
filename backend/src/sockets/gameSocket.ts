@@ -39,6 +39,8 @@ interface ActiveGame {
   rematchVotes: Set<string>;
   status: 'active' | 'finished' | 'abandoned';
   isCustomRoom: boolean;
+  moveTimer: ReturnType<typeof setTimeout> | null;
+  lastMoveAt: number;
 }
 
 interface CustomRoom {
@@ -59,6 +61,7 @@ const RANGE_EXPAND_AFTER_MS = 10_000;
 const STALE_GAME_CLEANUP_MS = 30 * 60_000; // 30 minutes
 const STALE_ROOM_CLEANUP_MS = 15 * 60_000; // 15 minutes
 const CLEANUP_INTERVAL_MS = 60_000; // Run cleanup every minute
+const MOVE_TIMEOUT_MS = 5 * 60_000; // 5 minutes per move
 
 export const matchmakingQueue: QueueEntry[] = [];
 export const activeGames = new Map<string, ActiveGame>();
@@ -86,6 +89,15 @@ function removeFromQueue(socketId: string): void {
 
   if (index >= 0) {
     matchmakingQueue.splice(index, 1);
+  }
+}
+
+/** Also remove by userId (prevents multi-tab queue exploits). */
+function removeUserFromQueue(userId: string): void {
+  for (let i = matchmakingQueue.length - 1; i >= 0; i--) {
+    if (matchmakingQueue[i].userId === userId) {
+      matchmakingQueue.splice(i, 1);
+    }
   }
 }
 
@@ -172,6 +184,31 @@ function emitGameFound(io: Server, activeGame: ActiveGame): void {
   }
 }
 
+/** Start (or restart) the move timer for the current player. */
+function startMoveTimer(io: Server, activeGame: ActiveGame): void {
+  if (activeGame.moveTimer) {
+    clearTimeout(activeGame.moveTimer);
+  }
+
+  activeGame.lastMoveAt = Date.now();
+
+  activeGame.moveTimer = setTimeout(async () => {
+    if (activeGame.status !== 'active') return;
+
+    // Current player loses on time
+    const loser = activeGame.state.currentPlayer;
+    const winner: Player = loser === 'black' ? 'white' : 'black';
+    await finishGame(io, activeGame, winner, 'move-timeout', 'abandoned');
+  }, MOVE_TIMEOUT_MS);
+}
+
+function clearMoveTimer(activeGame: ActiveGame): void {
+  if (activeGame.moveTimer) {
+    clearTimeout(activeGame.moveTimer);
+    activeGame.moveTimer = null;
+  }
+}
+
 async function createActiveGame(io: Server, first: QueueEntry, second: QueueEntry, isCustomRoom = false): Promise<void> {
   const blackEntry = first.joinedAt <= second.joinedAt ? first : second;
   const whiteEntry = blackEntry.socketId === first.socketId ? second : first;
@@ -212,6 +249,8 @@ async function createActiveGame(io: Server, first: QueueEntry, second: QueueEntr
     rematchVotes: new Set<string>(),
     status: 'active',
     isCustomRoom,
+    moveTimer: null,
+    lastMoveAt: Date.now(),
   };
 
   activeGames.set(activeGame.gameId, activeGame);
@@ -219,6 +258,7 @@ async function createActiveGame(io: Server, first: QueueEntry, second: QueueEntr
   socketToGame.set(whiteEntry.socketId, activeGame.gameId);
 
   emitGameFound(io, activeGame);
+  startMoveTimer(io, activeGame);
 }
 
 async function tryMatchmake(io: Server): Promise<void> {
@@ -287,6 +327,8 @@ async function finishGame(
   if (activeGame.status !== 'active') {
     return;
   }
+
+  clearMoveTimer(activeGame);
 
   activeGame.status = status;
   activeGame.state = {
@@ -431,31 +473,44 @@ export function initializeGameSocket(io: Server): void {
     const typedSocket = socket as SocketWithUser;
 
     socket.on('authenticate', async ({ token }: { token: string }) => {
-      await authenticateSocket(typedSocket, token);
+      try {
+        await authenticateSocket(typedSocket, token);
+      } catch (err) {
+        console.error('authenticate error:', err);
+        socket.emit('error', { message: 'Authentication failed.' });
+      }
     });
 
     socket.on('joinQueue', async ({ token }: { token?: string; rating?: number }) => {
-      const authenticatedUser = typedSocket.data.user ?? (token ? await authenticateSocket(typedSocket, token) : null);
+      try {
+        const authenticatedUser = typedSocket.data.user ?? (token ? await authenticateSocket(typedSocket, token) : null);
 
-      if (!authenticatedUser) {
-        socket.emit('error', { message: 'You must authenticate before joining the queue.' });
-        return;
+        if (!authenticatedUser) {
+          socket.emit('error', { message: 'You must authenticate before joining the queue.' });
+          return;
+        }
+
+        if (socketToGame.has(socket.id)) {
+          socket.emit('error', { message: 'You are already in an active game.' });
+          return;
+        }
+
+        // Prevent same user from joining queue across multiple tabs
+        removeUserFromQueue(authenticatedUser.userId);
+        removeFromQueue(socket.id);
+
+        matchmakingQueue.push({
+          ...authenticatedUser,
+          socketId: socket.id,
+          joinedAt: Date.now(),
+        });
+
+        socket.emit('queueJoined', { joinedAt: Date.now() });
+        await tryMatchmake(io);
+      } catch (err) {
+        console.error('joinQueue error:', err);
+        socket.emit('error', { message: 'Failed to join the queue.' });
       }
-
-      if (socketToGame.has(socket.id)) {
-        socket.emit('error', { message: 'You are already in an active game.' });
-        return;
-      }
-
-      removeFromQueue(socket.id);
-      matchmakingQueue.push({
-        ...authenticatedUser,
-        socketId: socket.id,
-        joinedAt: Date.now(),
-      });
-
-      socket.emit('queueJoined', { joinedAt: Date.now() });
-      await tryMatchmake(io);
     });
 
     socket.on('leaveQueue', () => {
@@ -464,74 +519,84 @@ export function initializeGameSocket(io: Server): void {
     });
 
     socket.on('createRoom', async ({ token }: { token?: string }) => {
-      const authenticatedUser = typedSocket.data.user ?? (token ? await authenticateSocket(typedSocket, token) : null);
+      try {
+        const authenticatedUser = typedSocket.data.user ?? (token ? await authenticateSocket(typedSocket, token) : null);
 
-      if (!authenticatedUser) {
-        socket.emit('error', { message: 'You must authenticate before creating a room.' });
-        return;
-      }
-
-      if (socketToGame.has(socket.id)) {
-        socket.emit('error', { message: 'You are already in an active game.' });
-        return;
-      }
-
-      // Remove from any existing room
-      for (const [code, room] of customRooms) {
-        if (room.host.socketId === socket.id) {
-          customRooms.delete(code);
+        if (!authenticatedUser) {
+          socket.emit('error', { message: 'You must authenticate before creating a room.' });
+          return;
         }
+
+        if (socketToGame.has(socket.id)) {
+          socket.emit('error', { message: 'You are already in an active game.' });
+          return;
+        }
+
+        // Remove from any existing room
+        for (const [code, room] of customRooms) {
+          if (room.host.socketId === socket.id) {
+            customRooms.delete(code);
+          }
+        }
+
+        const roomCode = generateRoomCode();
+        customRooms.set(roomCode, {
+          roomCode,
+          host: {
+            ...authenticatedUser,
+            socketId: socket.id,
+            joinedAt: Date.now(),
+          },
+          createdAt: Date.now(),
+        });
+
+        socket.emit('roomCreated', { roomCode });
+      } catch (err) {
+        console.error('createRoom error:', err);
+        socket.emit('error', { message: 'Failed to create room.' });
       }
-
-      const roomCode = generateRoomCode();
-      customRooms.set(roomCode, {
-        roomCode,
-        host: {
-          ...authenticatedUser,
-          socketId: socket.id,
-          joinedAt: Date.now(),
-        },
-        createdAt: Date.now(),
-      });
-
-      socket.emit('roomCreated', { roomCode });
     });
 
     socket.on('joinRoom', async ({ token, roomCode }: { token?: string; roomCode: string }) => {
-      const authenticatedUser = typedSocket.data.user ?? (token ? await authenticateSocket(typedSocket, token) : null);
+      try {
+        const authenticatedUser = typedSocket.data.user ?? (token ? await authenticateSocket(typedSocket, token) : null);
 
-      if (!authenticatedUser) {
-        socket.emit('error', { message: 'You must authenticate before joining a room.' });
-        return;
+        if (!authenticatedUser) {
+          socket.emit('error', { message: 'You must authenticate before joining a room.' });
+          return;
+        }
+
+        if (socketToGame.has(socket.id)) {
+          socket.emit('error', { message: 'You are already in an active game.' });
+          return;
+        }
+
+        const code = roomCode.toUpperCase().trim();
+        const room = customRooms.get(code);
+
+        if (!room) {
+          socket.emit('roomError', { message: 'Room not found. Check the code and try again.' });
+          return;
+        }
+
+        if (room.host.socketId === socket.id) {
+          socket.emit('roomError', { message: 'You cannot join your own room.' });
+          return;
+        }
+
+        customRooms.delete(code);
+
+        const joiner: QueueEntry = {
+          ...authenticatedUser,
+          socketId: socket.id,
+          joinedAt: Date.now(),
+        };
+
+        await createActiveGame(io, room.host, joiner, true);
+      } catch (err) {
+        console.error('joinRoom error:', err);
+        socket.emit('error', { message: 'Failed to join room.' });
       }
-
-      if (socketToGame.has(socket.id)) {
-        socket.emit('error', { message: 'You are already in an active game.' });
-        return;
-      }
-
-      const code = roomCode.toUpperCase().trim();
-      const room = customRooms.get(code);
-
-      if (!room) {
-        socket.emit('roomError', { message: 'Room not found. Check the code and try again.' });
-        return;
-      }
-
-      if (room.host.socketId === socket.id) {
-        socket.emit('roomError', { message: 'You cannot join your own room.' });
-        return;
-      }
-
-      customRooms.delete(code);
-
-      const joiner: QueueEntry = {
-        ...authenticatedUser,
-        socketId: socket.id,
-        joinedAt: Date.now(),
-      };
-
-      await createActiveGame(io, room.host, joiner, true);
     });
 
     socket.on('cancelRoom', () => {
@@ -545,147 +610,164 @@ export function initializeGameSocket(io: Server): void {
     });
 
     socket.on('makeMove', async ({ gameId, row, col }: { gameId: string; row: number; col: number }) => {
-      const authenticatedUser = typedSocket.data.user;
-      const activeGame = activeGames.get(gameId);
+      try {
+        const authenticatedUser = typedSocket.data.user;
+        const activeGame = activeGames.get(gameId);
 
-      if (!authenticatedUser || !activeGame) {
-        socket.emit('invalidMove', { reason: 'Game not found or authentication missing.' });
-        return;
-      }
+        if (!authenticatedUser || !activeGame) {
+          socket.emit('invalidMove', { reason: 'Game not found or authentication missing.' });
+          return;
+        }
 
-      if (activeGame.status !== 'active') {
-        socket.emit('invalidMove', { reason: 'This game is no longer active.' });
-        return;
-      }
+        if (activeGame.status !== 'active') {
+          socket.emit('invalidMove', { reason: 'This game is no longer active.' });
+          return;
+        }
 
-      const player = getGamePlayer(activeGame, authenticatedUser.userId);
+        const player = getGamePlayer(activeGame, authenticatedUser.userId);
 
-      if (!player) {
-        socket.emit('invalidMove', { reason: 'You are not a player in this game.' });
-        return;
-      }
+        if (!player) {
+          socket.emit('invalidMove', { reason: 'You are not a player in this game.' });
+          return;
+        }
 
-      if (activeGame.state.currentPlayer !== player.color) {
-        socket.emit('invalidMove', { reason: 'It is not your turn.' });
-        return;
-      }
+        if (activeGame.state.currentPlayer !== player.color) {
+          socket.emit('invalidMove', { reason: 'It is not your turn.' });
+          return;
+        }
 
-      const { newState, flipped, valid } = processMove(activeGame.state, row, col);
+        const { newState, flipped, valid } = processMove(activeGame.state, row, col);
 
-      if (!valid) {
-        socket.emit('invalidMove', { reason: 'That move is not legal.' });
-        return;
-      }
+        if (!valid) {
+          socket.emit('invalidMove', { reason: 'That move is not legal.' });
+          return;
+        }
 
-      activeGame.state = newState;
-      await persistMoves(activeGame);
+        activeGame.state = newState;
+        await persistMoves(activeGame);
 
-      const lastMove = newState.moveHistory[newState.moveHistory.length - 1] ?? null;
+        const lastMove = newState.moveHistory[newState.moveHistory.length - 1] ?? null;
 
-      io.to(gameId).emit('gameUpdate', {
-        state: newState,
-        lastMove,
-        flipped,
-      });
+        io.to(gameId).emit('gameUpdate', {
+          state: newState,
+          lastMove,
+          flipped,
+        });
 
-      if (newState.gameStatus === 'finished') {
-        await finishGame(io, activeGame, newState.winner, 'board-complete', 'finished');
+        if (newState.gameStatus === 'finished') {
+          await finishGame(io, activeGame, newState.winner, 'board-complete', 'finished');
+        } else {
+          // Reset move timer for next player
+          startMoveTimer(io, activeGame);
+        }
+      } catch (err) {
+        console.error('makeMove error:', err);
+        socket.emit('invalidMove', { reason: 'An unexpected error occurred.' });
       }
     });
 
     socket.on('resign', async ({ gameId }: { gameId: string }) => {
-      const authenticatedUser = typedSocket.data.user;
-      const activeGame = activeGames.get(gameId);
+      try {
+        const authenticatedUser = typedSocket.data.user;
+        const activeGame = activeGames.get(gameId);
 
-      if (!authenticatedUser || !activeGame || activeGame.status !== 'active') {
-        return;
+        if (!authenticatedUser || !activeGame || activeGame.status !== 'active') {
+          return;
+        }
+
+        const player = getGamePlayer(activeGame, authenticatedUser.userId);
+
+        if (!player) {
+          return;
+        }
+
+        const winner: Player = player.color === 'black' ? 'white' : 'black';
+        await finishGame(io, activeGame, winner, 'resignation', 'abandoned');
+      } catch (err) {
+        console.error('resign error:', err);
       }
-
-      const player = getGamePlayer(activeGame, authenticatedUser.userId);
-
-      if (!player) {
-        return;
-      }
-
-      const winner: Player = player.color === 'black' ? 'white' : 'black';
-      await finishGame(io, activeGame, winner, 'resignation', 'abandoned');
     });
 
     socket.on('requestRematch', async ({ gameId }: { gameId: string }) => {
-      const authenticatedUser = typedSocket.data.user;
-      const activeGame = activeGames.get(gameId);
+      try {
+        const authenticatedUser = typedSocket.data.user;
+        const activeGame = activeGames.get(gameId);
 
-      if (!authenticatedUser || !activeGame || activeGame.status === 'active') {
-        return;
+        if (!authenticatedUser || !activeGame || activeGame.status === 'active') {
+          return;
+        }
+
+        const player = getGamePlayer(activeGame, authenticatedUser.userId);
+
+        if (!player) {
+          return;
+        }
+
+        activeGame.rematchVotes.add(authenticatedUser.userId);
+
+        const opponent =
+          player.userId === activeGame.blackPlayer.userId ? activeGame.whitePlayer : activeGame.blackPlayer;
+        const opponentSocket = io.sockets.sockets.get(opponent.socketId);
+        opponentSocket?.emit('rematchRequested');
+
+        if (activeGame.rematchVotes.size < 2) {
+          return;
+        }
+
+        activeGames.delete(activeGame.gameId);
+        socketToGame.delete(activeGame.blackPlayer.socketId);
+        socketToGame.delete(activeGame.whitePlayer.socketId);
+
+        await createActiveGame(
+          io,
+          {
+            ...activeGame.whitePlayer,
+            joinedAt: Date.now(),
+            socketId: activeGame.whitePlayer.socketId,
+          },
+          {
+            ...activeGame.blackPlayer,
+            joinedAt: Date.now() + 1,
+            socketId: activeGame.blackPlayer.socketId,
+          },
+          activeGame.isCustomRoom,
+        );
+      } catch (err) {
+        console.error('requestRematch error:', err);
       }
-
-      const player = getGamePlayer(activeGame, authenticatedUser.userId);
-
-      if (!player) {
-        return;
-      }
-
-      activeGame.rematchVotes.add(authenticatedUser.userId);
-
-      const opponent =
-        player.userId === activeGame.blackPlayer.userId ? activeGame.whitePlayer : activeGame.blackPlayer;
-      const opponentSocket = io.sockets.sockets.get(opponent.socketId);
-      opponentSocket?.emit('rematchRequested');
-
-      if (activeGame.rematchVotes.size < 2) {
-        return;
-      }
-
-      activeGames.delete(activeGame.gameId);
-      socketToGame.delete(activeGame.blackPlayer.socketId);
-      socketToGame.delete(activeGame.whitePlayer.socketId);
-
-      await createActiveGame(
-        io,
-        {
-          ...activeGame.whitePlayer,
-          joinedAt: Date.now(),
-          socketId: activeGame.whitePlayer.socketId,
-        },
-        {
-          ...activeGame.blackPlayer,
-          joinedAt: Date.now() + 1,
-          socketId: activeGame.blackPlayer.socketId,
-        },
-        activeGame.isCustomRoom,
-      );
     });
 
     socket.on('disconnect', async () => {
-      removeFromQueue(socket.id);
+      try {
+        removeFromQueue(socket.id);
 
-      // Clean up custom rooms hosted by this socket
-      for (const [code, room] of customRooms) {
-        if (room.host.socketId === socket.id) {
-          customRooms.delete(code);
+        // Clean up custom rooms hosted by this socket
+        for (const [code, room] of customRooms) {
+          if (room.host.socketId === socket.id) {
+            customRooms.delete(code);
+          }
         }
+
+        const gameId = socketToGame.get(socket.id);
+        if (!gameId) {
+          return;
+        }
+
+        const activeGame = activeGames.get(gameId);
+        socketToGame.delete(socket.id);
+
+        if (!activeGame || activeGame.status !== 'active') {
+          return;
+        }
+
+        const disconnectedPlayer =
+          activeGame.blackPlayer.socketId === socket.id ? activeGame.blackPlayer : activeGame.whitePlayer;
+        const winner: Player = disconnectedPlayer.color === 'black' ? 'white' : 'black';
+
+        await finishGame(io, activeGame, winner, 'disconnect-forfeit', 'abandoned');
+      } catch (err) {
+        console.error('disconnect cleanup error:', err);
       }
-
-      const gameId = socketToGame.get(socket.id);
-      if (!gameId) {
-        return;
-      }
-
-      const activeGame = activeGames.get(gameId);
-      socketToGame.delete(socket.id);
-
-      if (!activeGame || activeGame.status !== 'active') {
-        return;
-      }
-
-      const disconnectedPlayer =
-        activeGame.blackPlayer.socketId === socket.id ? activeGame.blackPlayer : activeGame.whitePlayer;
-      const winner: Player = disconnectedPlayer.color === 'black' ? 'white' : 'black';
-
-      await finishGame(io, activeGame, winner, 'disconnect-forfeit', 'abandoned');
     });
   });
 }
-
-
-

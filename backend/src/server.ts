@@ -79,4 +79,27 @@ startServer().catch((error) => {
   process.exit(1);
 });
 
+// Graceful shutdown — Render sends SIGTERM during deploys
+function gracefulShutdown(signal: string): void {
+  console.log(`Received ${signal}. Shutting down gracefully...`);
+  server.close(() => {
+    mongoose.connection.close(false).then(() => {
+      console.log('Server and database connections closed.');
+      process.exit(0);
+    });
+  });
+  // Force exit after 10 seconds
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout.');
+    process.exit(1);
+  }, 10_000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason);
+});
+
 export { app, server, io };

@@ -5,13 +5,23 @@ import type { LeaderboardEntry } from '../types';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
+const RANK_COLORS: Record<string, string> = {
+  Beginner: 'text-gray-400',
+  Intermediate: 'text-blue-400',
+  Advanced: 'text-purple-400',
+  Expert: 'text-orange-400',
+  Master: 'text-yellow-300',
+};
+
 export function LeaderboardPage() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     fetchLeaderboard()
       .then((response) => setEntries(response))
+      .catch(() => setError(true))
       .finally(() => setLoading(false));
   }, []);
 
@@ -43,30 +53,53 @@ export function LeaderboardPage() {
               {loading ? (
                 <tr>
                   <td className="px-4 py-6 text-gray-400" colSpan={7}>
-                    Loading leaderboard...
+                    <div className="flex items-center gap-3">
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-green-400 border-t-transparent" />
+                      Loading leaderboard...
+                    </div>
                   </td>
                 </tr>
               ) : null}
 
-              {!loading && entries.length === 0 ? (
+              {!loading && error ? (
+                <tr>
+                  <td className="px-4 py-6" colSpan={7}>
+                    <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                      Failed to load leaderboard. Please try refreshing.
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
+
+              {!loading && !error && entries.length === 0 ? (
                 <tr>
                   <td className="px-4 py-6 text-gray-400" colSpan={7}>
-                    No ranked players yet.
+                    No ranked players yet. Be the first to climb!
                   </td>
                 </tr>
               ) : null}
 
               {entries.map((entry, index) => (
-                <tr key={entry.id} className="transition hover:bg-gray-800/70">
+                <tr
+                  key={entry.id}
+                  className={[
+                    'transition',
+                    index === 0
+                      ? 'bg-yellow-500/5 hover:bg-yellow-500/10'
+                      : 'hover:bg-gray-800/70',
+                  ].join(' ')}
+                >
                   <td className="px-4 py-4 font-semibold text-white">
                     {MEDALS[index] ? `${MEDALS[index]} ${entry.position}` : entry.position}
                   </td>
-                  <td className="px-4 py-4">{entry.username}</td>
-                  <td className="px-4 py-4 text-green-400">{entry.rating}</td>
-                  <td className="px-4 py-4">{entry.rank}</td>
-                  <td className="px-4 py-4">{entry.wins}</td>
-                  <td className="px-4 py-4">{entry.losses}</td>
-                  <td className="px-4 py-4">{entry.gamesPlayed}</td>
+                  <td className="px-4 py-4 font-medium">{entry.username}</td>
+                  <td className="px-4 py-4 font-semibold tabular-nums text-green-400">{entry.rating}</td>
+                  <td className={`px-4 py-4 font-medium ${RANK_COLORS[entry.rank] ?? 'text-gray-400'}`}>
+                    {entry.rank}
+                  </td>
+                  <td className="px-4 py-4 tabular-nums">{entry.wins}</td>
+                  <td className="px-4 py-4 tabular-nums">{entry.losses}</td>
+                  <td className="px-4 py-4 tabular-nums">{entry.gamesPlayed}</td>
                 </tr>
               ))}
             </tbody>

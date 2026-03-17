@@ -17,6 +17,10 @@ export function useSocket() {
       socketRef.current = io(import.meta.env.VITE_SOCKET_URL ?? 'http://localhost:4000', {
         autoConnect: false,
         transports: ['websocket'],
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
       });
 
       socketRef.current.on('connect', () => {
@@ -26,6 +30,11 @@ export function useSocket() {
 
       socketRef.current.on('disconnect', () => {
         setIsConnected(false);
+      });
+
+      socketRef.current.on('reconnect', () => {
+        setIsConnected(true);
+        socketRef.current?.emit('authenticate', { token });
       });
     }
 

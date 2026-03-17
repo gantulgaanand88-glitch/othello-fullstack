@@ -7,6 +7,7 @@ import MatchmakingPanel from '../components/MatchmakingPanel';
 import MoveHistory from '../components/MoveHistory';
 import PlayerPanel from '../components/PlayerPanel';
 import { useSocket } from '../hooks/useSocket';
+import { loginAsGuest, setAuthToken } from '../services/api';
 import {
   AuthUser,
   GameFoundEvent,
@@ -29,7 +30,7 @@ interface GamePageProps {
 
 export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProps) {
   const navigate = useNavigate();
-  const { connect, disconnect, emit, on } = useSocket();
+  const { isConnected, connect, disconnect, emit, on } = useSocket();
   const userRef = useRef<AuthUser | null>(user);
   const onUserUpdateRef = useRef(onUserUpdate);
 
@@ -45,6 +46,8 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
   const [ratingChange, setRatingChange] = useState<number | null>(null);
   const [rematchPending, setRematchPending] = useState(false);
   const [rematchRequestedByOpponent, setRematchRequestedByOpponent] = useState(false);
+  const [showCopiedToast, setShowCopiedToast] = useState(false);
+  const [resignConfirmOpen, setResignConfirmOpen] = useState(false);
 
   // Custom room state
   const [roomCode, setRoomCode] = useState<string | null>(null);
@@ -92,6 +95,7 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
         setWaitingForOpponent(false);
         setRoomError(null);
         setJoinCode('');
+        setResignConfirmOpen(false);
       }),
       on<GameUpdateEvent>('gameUpdate', ({ state, lastMove: move, flipped: nextFlipped }) => {
         setGameState(state);
@@ -107,6 +111,7 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
         setGameResult(result);
         setQueueJoinedAt(null);
         setRematchPending(false);
+        setResignConfirmOpen(false);
       }),
       on<RatingUpdateEvent>('ratingUpdate', ({ newRating, ratingChange: nextRatingChange }) => {
         setRatingChange(nextRatingChange);
@@ -148,6 +153,17 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
     };
   }, [connect, disconnect, on, token]);
 
+  const handlePlayAsGuest = async () => {
+    try {
+      const response = await loginAsGuest();
+      setAuthToken(response.token);
+      window.localStorage.setItem('othello-auth', JSON.stringify(response));
+      window.location.reload();
+    } catch {
+      onOpenAuth('login');
+    }
+  };
+
   if (!user || !token) {
     return (
       <div className="mx-auto max-w-2xl rounded-[2rem] border border-gray-800 bg-gray-800/80 p-10 text-center shadow-xl">
@@ -160,7 +176,7 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
           <button
             type="button"
             onClick={() => onOpenAuth('login')}
-            className="rounded-full bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-500"
+            className="rounded-full bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-500 hover:shadow-lg hover:shadow-green-500/20"
           >
             Login to Play
           </button>
@@ -170,6 +186,13 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
             className="rounded-full border border-gray-600 px-6 py-3 text-sm font-semibold text-gray-200 transition hover:border-gray-500 hover:bg-gray-800"
           >
             Create Account
+          </button>
+          <button
+            type="button"
+            onClick={handlePlayAsGuest}
+            className="rounded-full border border-gray-600 bg-gray-700/50 px-6 py-3 text-sm font-semibold text-gray-200 transition hover:bg-gray-700"
+          >
+            ⚡ Play as Guest
           </button>
         </div>
       </div>
@@ -198,7 +221,13 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
       return;
     }
 
+    if (!resignConfirmOpen) {
+      setResignConfirmOpen(true);
+      return;
+    }
+
     emit('resign', { gameId });
+    setResignConfirmOpen(false);
   };
 
   const handleRematch = () => {
@@ -233,6 +262,8 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
   const handleCopyRoomCode = () => {
     if (roomCode) {
       navigator.clipboard.writeText(roomCode);
+      setShowCopiedToast(true);
+      setTimeout(() => setShowCopiedToast(false), 2000);
     }
   };
 
@@ -241,6 +272,14 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
 
   return (
     <div className="space-y-6">
+      {/* Connection status indicator */}
+      {!isConnected && gameState ? (
+        <div className="flex items-center gap-2 rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
+          <span className="h-2.5 w-2.5 rounded-full bg-yellow-400 animate-pulse-soft" />
+          Reconnecting to server...
+        </div>
+      ) : null}
+
       {!gameState && !queueJoinedAt && !waitingForOpponent ? (
         <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="space-y-6">
@@ -259,8 +298,11 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
               <button
                 type="button"
                 onClick={handleJoinQueue}
-                className="mt-8 rounded-full bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-500"
+                className="mt-8 inline-flex items-center gap-2 rounded-full bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-500 hover:shadow-lg hover:shadow-green-500/20"
               >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                </svg>
                 {user.isGuest ? 'Find Match' : 'Find Ranked Match'}
               </button>
             </div>
@@ -291,7 +333,7 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
                     }}
                     placeholder="Enter room code"
                     maxLength={6}
-                    className="flex-1 rounded-full border border-gray-700 bg-gray-900 px-4 py-3 text-center text-sm font-mono tracking-[0.3em] text-white uppercase outline-none transition focus:border-green-500"
+                    className="flex-1 rounded-full border border-gray-700 bg-gray-900 px-4 py-3 text-center text-sm font-mono tracking-[0.3em] text-white uppercase outline-none transition focus:border-green-500 focus:ring-1 focus:ring-green-500/30"
                   />
                   <button
                     type="button"
@@ -304,7 +346,9 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
               </div>
 
               {roomError ? (
-                <p className="mt-3 text-sm text-red-400">{roomError}</p>
+                <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm text-red-300">
+                  {roomError}
+                </div>
               ) : null}
             </div>
           </div>
@@ -318,21 +362,21 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
               </div>
             ) : (
               <div className="mt-6 grid grid-cols-2 gap-4">
-                <div className="rounded-2xl border border-gray-700 bg-gray-900/70 p-4">
+                <div className="rounded-2xl border border-gray-700 bg-gray-900/70 p-4 transition hover:border-gray-600">
                   <p className="text-sm text-gray-400">Rating</p>
-                  <p className="mt-2 text-2xl font-semibold text-white">{user.rating}</p>
+                  <p className="mt-2 text-2xl font-semibold tabular-nums text-white">{user.rating}</p>
                 </div>
-                <div className="rounded-2xl border border-gray-700 bg-gray-900/70 p-4">
+                <div className="rounded-2xl border border-gray-700 bg-gray-900/70 p-4 transition hover:border-gray-600">
                   <p className="text-sm text-gray-400">Games</p>
-                  <p className="mt-2 text-2xl font-semibold text-white">{user.gamesPlayed}</p>
+                  <p className="mt-2 text-2xl font-semibold tabular-nums text-white">{user.gamesPlayed}</p>
                 </div>
-                <div className="rounded-2xl border border-gray-700 bg-gray-900/70 p-4">
+                <div className="rounded-2xl border border-gray-700 bg-gray-900/70 p-4 transition hover:border-gray-600">
                   <p className="text-sm text-gray-400">Wins</p>
-                  <p className="mt-2 text-2xl font-semibold text-white">{user.wins}</p>
+                  <p className="mt-2 text-2xl font-semibold tabular-nums text-green-400">{user.wins}</p>
                 </div>
-                <div className="rounded-2xl border border-gray-700 bg-gray-900/70 p-4">
+                <div className="rounded-2xl border border-gray-700 bg-gray-900/70 p-4 transition hover:border-gray-600">
                   <p className="text-sm text-gray-400">Draws</p>
-                  <p className="mt-2 text-2xl font-semibold text-white">{user.draws}</p>
+                  <p className="mt-2 text-2xl font-semibold tabular-nums text-yellow-400">{user.draws}</p>
                 </div>
               </div>
             )}
@@ -368,7 +412,7 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
               onClick={handleCopyRoomCode}
               className="rounded-full bg-green-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-green-500"
             >
-              Copy Code
+              📋 Copy Code
             </button>
             <button
               type="button"
@@ -417,14 +461,34 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
             />
 
             <div className="flex flex-col gap-3 sm:flex-row">
-              <button
-                type="button"
-                onClick={handleResign}
-                disabled={gameState.gameStatus !== 'playing'}
-                className="rounded-full border border-red-500/40 px-5 py-3 text-sm font-medium text-red-200 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Resign
-              </button>
+              {resignConfirmOpen ? (
+                <div className="flex items-center gap-2 rounded-full border border-red-500/40 bg-red-500/10 px-4 py-2">
+                  <span className="text-sm text-red-200">Are you sure?</span>
+                  <button
+                    type="button"
+                    onClick={handleResign}
+                    className="rounded-full bg-red-600 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-red-500"
+                  >
+                    Yes, Resign
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setResignConfirmOpen(false)}
+                    className="rounded-full border border-gray-600 px-4 py-1.5 text-xs font-medium text-gray-300 transition hover:border-gray-500"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleResign}
+                  disabled={gameState.gameStatus !== 'playing'}
+                  className="rounded-full border border-red-500/40 px-5 py-3 text-sm font-medium text-red-200 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Resign
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => navigate('/')}
@@ -454,6 +518,13 @@ export function GamePage({ user, token, onOpenAuth, onUserUpdate }: GamePageProp
         onRematch={handleRematch}
         onHome={() => navigate('/')}
       />
+
+      {/* Copy toast */}
+      {showCopiedToast ? (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full border border-green-500/30 bg-green-600 px-6 py-3 text-sm font-medium text-white shadow-lg shadow-green-500/20 animate-toast">
+          ✓ Room code copied!
+        </div>
+      ) : null}
     </div>
   );
 }

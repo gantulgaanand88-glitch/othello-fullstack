@@ -37,8 +37,8 @@ export function calculateElo(
   const kA = getKFactor(ratingA, gamesPlayedA);
   const kB = getKFactor(ratingB, gamesPlayedB);
 
-  const newRatingA = Math.round(ratingA + kA * (scoreA - expectedA));
-  const newRatingB = Math.round(ratingB + kB * (scoreB - expectedB));
+  const newRatingA = Math.max(100, Math.round(ratingA + kA * (scoreA - expectedA)));
+  const newRatingB = Math.max(100, Math.round(ratingB + kB * (scoreB - expectedB)));
 
   return {
     newRatingA,
