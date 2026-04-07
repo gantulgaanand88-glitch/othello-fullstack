@@ -5,7 +5,7 @@ Welcome to the **Full-Stack Othello** project! This is a real-time multiplayer i
 ## 🚀 Project Overview
 
 This project is built using a modern full-stack JavaScript/TypeScript ecosystem. It features real-time matchmaking, an Elo-based ranking system, user authentication, and a fully reactive game board.
-
+runnning on : https://othello-app-7qg0.onrender.com/
 The application is split into two main parts:
 1. **Frontend:** A React application built with Vite and Tailwind CSS.
 2. **Backend:** A Node.js/Express server using Socket.io for real-time communication and MongoDB for data storage.
