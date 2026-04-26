@@ -2,7 +2,7 @@
 
 Welcome to the **Full-Stack Othello** project! This is a real-time multiplayer implementation of the classic board game Othello (also known as Reversi). 
 
-## 🚀 Project Overview
+##  Project Overview
 
 This project is built using a modern full-stack JavaScript/TypeScript ecosystem. It features real-time matchmaking, an Elo-based ranking system, user authentication, and a fully reactive game board.
 running on : https://othello-app-7qg0.onrender.com/
@@ -12,7 +12,7 @@ The application is split into two main parts:
 
 ---
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 ### Frontend
 - **Framework:** React 18
@@ -31,7 +31,7 @@ The application is split into two main parts:
 
 ---
 
-## 🧠 Architecture & How It Works 
+##  Architecture & How It Works 
 
 Here is a breakdown of how the different pieces of the project communicate with each other:
 
@@ -56,7 +56,7 @@ When a game finishes, the server calculates the new Elo ratings for both players
 
 ---
 
-## 💻 Running the Project Locally
+##  Running the Project Locally
 
 ### Prerequisites
 - Node.js (v18+)
@@ -76,7 +76,7 @@ When a game finishes, the server calculates the new Elo ratings for both players
 
 ---
 
-## 🎯 Key Features to Demo
+## Key Features to Demo
 1. **User Auth:** Show creating an account and logging in.
 2. **Real-time Matchmaking:** Open two browser windows, log in as different users, and queue up at the same time to watch them connect.
 3. **Gameplay Validation:** Show how the server only allows legal moves and properly calculates the "flips".
