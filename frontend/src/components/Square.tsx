@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { Cell } from '../types';
 
 interface SquareProps {
+  row: number;
+  col: number;
   cell: Cell;
   isLegalMove: boolean;
   isLastMove: boolean;
@@ -10,7 +12,16 @@ interface SquareProps {
   onClick: () => void;
 }
 
-export function Square({ cell, isLegalMove, isLastMove, isFlipped, flipDelay, onClick }: SquareProps) {
+export const Square = React.memo(function Square({
+  row,
+  col,
+  cell,
+  isLegalMove,
+  isLastMove,
+  isFlipped,
+  flipDelay,
+  onClick,
+}: SquareProps) {
   const [animating, setAnimating] = useState(false);
   const [showOldColor, setShowOldColor] = useState(false);
 
@@ -27,12 +38,10 @@ export function Square({ cell, isLegalMove, isLastMove, isFlipped, flipDelay, on
       setAnimating(true);
       setShowOldColor(true);
 
-      // At the 50% mark of the 600ms animation (300ms), swap to the new color
       const midSwap = setTimeout(() => {
         setShowOldColor(false);
       }, 300);
 
-      // Clear animation flag after it completes
       const endTimer = setTimeout(() => {
         setAnimating(false);
       }, 620);
@@ -46,11 +55,15 @@ export function Square({ cell, isLegalMove, isLastMove, isFlipped, flipDelay, on
     return () => clearTimeout(startDelay);
   }, [isFlipped, flipDelay, cell]);
 
-  const label = cell
-    ? `${cell} piece`
-    : isLegalMove
-      ? 'Legal move'
-      : 'Empty square';
+  const colLetter = String.fromCharCode(97 + col).toUpperCase(); // A-H
+  const rowNumber = 8 - row; // Othello standard: rows are numbered 1-8 starting from the bottom
+  const label = `${colLetter}${rowNumber}: ${
+    cell
+      ? `${cell} piece`
+      : isLegalMove
+        ? 'empty, legal move available'
+        : 'empty'
+  }`;
 
   // Determine the displayed color: if animating and showing old color, invert
   let pieceColor = cell;
@@ -64,7 +77,7 @@ export function Square({ cell, isLegalMove, isLastMove, isFlipped, flipDelay, on
       onClick={onClick}
       aria-label={label}
       className={[
-        'relative aspect-square w-full overflow-hidden border border-black/20 transition-colors duration-200',
+        'relative aspect-square w-full overflow-hidden border border-black/20 transition-colors duration-200 outline-none focus:ring-2 focus:ring-inset focus:ring-green-400',
         'bg-[#2d5a27] hover:bg-[#35692e]',
         isLastMove ? 'ring-2 ring-inset ring-yellow-400/80' : '',
       ].join(' ')}
@@ -91,6 +104,6 @@ export function Square({ cell, isLegalMove, isLastMove, isFlipped, flipDelay, on
       ) : null}
     </button>
   );
-}
+});
 
 export default Square;

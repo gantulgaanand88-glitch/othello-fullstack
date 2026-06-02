@@ -11,7 +11,7 @@ import {
 import { verifyAuthToken } from '../middleware/auth';
 import { Game } from '../models/Game';
 import { User } from '../models/User';
-import { calculateElo } from '../utils/elo';
+import { getEloUpdateOps } from '../utils/elo';
 
 interface AuthenticatedSocketData {
   userId: string;
@@ -41,6 +41,7 @@ interface ActiveGame {
   isCustomRoom: boolean;
   moveTimer: ReturnType<typeof setTimeout> | null;
   lastMoveAt: number;
+  disconnectTimer?: ReturnType<typeof setTimeout> | null;
 }
 
 interface CustomRoom {
@@ -71,9 +72,15 @@ export const customRooms = new Map<string, CustomRoom>();
 function generateRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
-  const bytes = crypto.randomBytes(6);
-  for (let i = 0; i < 6; i++) {
-    code += chars[bytes[i] % chars.length];
+  while (true) {
+    code = '';
+    const bytes = crypto.randomBytes(6);
+    for (let i = 0; i < 6; i++) {
+      code += chars[bytes[i] % chars.length];
+    }
+    if (!customRooms.has(code)) {
+      break;
+    }
   }
   return code;
 }
@@ -92,7 +99,6 @@ function removeFromQueue(socketId: string): void {
   }
 }
 
-/** Also remove by userId (prevents multi-tab queue exploits). */
 function removeUserFromQueue(userId: string): void {
   for (let i = matchmakingQueue.length - 1; i >= 0; i--) {
     if (matchmakingQueue[i].userId === userId) {
@@ -111,44 +117,6 @@ function getGamePlayer(activeGame: ActiveGame, userId: string): GamePlayer | nul
   }
 
   return null;
-}
-
-async function authenticateSocket(socket: SocketWithUser, token: string): Promise<AuthenticatedSocketData | null> {
-  try {
-    const payload = verifyAuthToken(token);
-
-    // Guest user - no DB lookup needed
-    if (payload.userId.startsWith('guest_')) {
-      const guestUser: AuthenticatedSocketData = {
-        userId: payload.userId,
-        username: `Guest_${payload.userId.slice(-4)}`,
-        rating: 1200,
-        isGuest: true,
-      };
-      socket.data.user = guestUser;
-      return guestUser;
-    }
-
-    const user = await User.findById(payload.userId).select('username rating').lean();
-
-    if (!user) {
-      socket.emit('error', { message: 'Authentication failed.' });
-      return null;
-    }
-
-    const authenticatedUser: AuthenticatedSocketData = {
-      userId: String(user._id),
-      username: user.username,
-      rating: user.rating,
-      isGuest: false,
-    };
-
-    socket.data.user = authenticatedUser;
-    return authenticatedUser;
-  } catch {
-    socket.emit('error', { message: 'Authentication failed.' });
-    return null;
-  }
 }
 
 function emitGameFound(io: Server, activeGame: ActiveGame): void {
@@ -209,10 +177,7 @@ function clearMoveTimer(activeGame: ActiveGame): void {
   }
 }
 
-async function createActiveGame(io: Server, first: QueueEntry, second: QueueEntry, isCustomRoom = false): Promise<void> {
-  const blackEntry = first.joinedAt <= second.joinedAt ? first : second;
-  const whiteEntry = blackEntry.socketId === first.socketId ? second : first;
-
+async function createActiveGame(io: Server, blackEntry: QueueEntry, whiteEntry: QueueEntry, isCustomRoom = false): Promise<void> {
   const hasGuest = !!(blackEntry.isGuest || whiteEntry.isGuest);
   let dbGameId = '';
 
@@ -277,6 +242,7 @@ async function tryMatchmake(io: Server): Promise<void> {
       ) {
         matchmakingQueue.splice(candidateIndex, 1);
         matchmakingQueue.splice(index, 1);
+        // First entry gets black, candidate gets white
         await createActiveGame(io, entry, candidate);
         await tryMatchmake(io);
         return;
@@ -289,17 +255,22 @@ async function persistMoves(activeGame: ActiveGame): Promise<void> {
   const hasGuest = !!(activeGame.blackPlayer.isGuest || activeGame.whitePlayer.isGuest);
   if (hasGuest) return;
 
+  const latestMove = activeGame.state.moveHistory[activeGame.state.moveHistory.length - 1];
+  if (!latestMove) return;
+
   await Game.findByIdAndUpdate(activeGame.dbGameId, {
+    $push: {
+      moves: {
+        player: latestMove.player,
+        row: latestMove.row,
+        col: latestMove.col,
+        flipped: latestMove.flipped,
+        blackScore: latestMove.blackScore,
+        whiteScore: latestMove.whiteScore,
+        timestamp: new Date(latestMove.timestamp),
+      },
+    },
     $set: {
-      moves: activeGame.state.moveHistory.map((move) => ({
-        player: move.player,
-        row: move.row,
-        col: move.col,
-        flipped: move.flipped,
-        blackScore: move.blackScore,
-        whiteScore: move.whiteScore,
-        timestamp: new Date(move.timestamp),
-      })),
       status: activeGame.status,
     },
   });
@@ -338,6 +309,13 @@ async function finishGame(
     legalMoves: [],
   };
 
+  // Notify spectators in the room
+  io.to(activeGame.gameId).emit('spectatorGameOver', {
+    winner,
+    reason,
+    finalState: activeGame.state,
+  });
+
   const hasGuest = !!(activeGame.blackPlayer.isGuest || activeGame.whitePlayer.isGuest);
 
   let eloChangeA = 0;
@@ -347,12 +325,12 @@ async function finishGame(
 
   if (!hasGuest) {
     const [blackUser, whiteUser] = await Promise.all([
-      User.findById(activeGame.blackPlayer.userId),
-      User.findById(activeGame.whitePlayer.userId),
+      User.findById(activeGame.blackPlayer.userId).select('rating gamesPlayed').lean(),
+      User.findById(activeGame.whitePlayer.userId).select('rating gamesPlayed').lean(),
     ]);
 
     if (blackUser && whiteUser) {
-      const elo = calculateElo(
+      const { opsA, opsB, eloResult } = getEloUpdateOps(
         blackUser.rating,
         whiteUser.rating,
         blackUser.gamesPlayed,
@@ -360,49 +338,24 @@ async function finishGame(
         getResultForBlack(winner),
       );
 
-      blackUser.rating = elo.newRatingA;
-      whiteUser.rating = elo.newRatingB;
-      blackUser.gamesPlayed += 1;
-      whiteUser.gamesPlayed += 1;
-
-      if (winner === 'black') {
-        blackUser.wins += 1;
-        whiteUser.losses += 1;
-      } else if (winner === 'white') {
-        blackUser.losses += 1;
-        whiteUser.wins += 1;
-      } else {
-        blackUser.draws += 1;
-        whiteUser.draws += 1;
-      }
-
       await Promise.all([
-        blackUser.save(),
-        whiteUser.save(),
+        User.findByIdAndUpdate(activeGame.blackPlayer.userId, { $inc: opsA }),
+        User.findByIdAndUpdate(activeGame.whitePlayer.userId, { $inc: opsB }),
         Game.findByIdAndUpdate(activeGame.dbGameId, {
           $set: {
-            moves: activeGame.state.moveHistory.map((move) => ({
-              player: move.player,
-              row: move.row,
-              col: move.col,
-              flipped: move.flipped,
-              blackScore: move.blackScore,
-              whiteScore: move.whiteScore,
-              timestamp: new Date(move.timestamp),
-            })),
             result: winner,
             status,
             endTime: new Date(),
-            blackRatingChange: elo.changeA,
-            whiteRatingChange: elo.changeB,
+            blackRatingChange: eloResult.changeA,
+            whiteRatingChange: eloResult.changeB,
           },
         }),
       ]);
 
-      eloChangeA = elo.changeA;
-      eloChangeB = elo.changeB;
-      newRatingA = elo.newRatingA;
-      newRatingB = elo.newRatingB;
+      eloChangeA = eloResult.changeA;
+      eloChangeB = eloResult.changeB;
+      newRatingA = eloResult.newRatingA;
+      newRatingB = eloResult.newRatingB;
     }
   }
 
@@ -447,14 +400,51 @@ async function finishGame(
   }
 }
 
+function filterProfanity(text: string): string {
+  const badWords = /\b(shit|fuck|ass|bitch|bastard|cunt|dick|cock|pussy)\b/gi;
+  return text.replace(badWords, '****');
+}
+
 export function initializeGameSocket(io: Server): void {
+  // Authentication middleware
+  io.use(async (socket, next) => {
+    const token = socket.handshake.auth?.token as string | undefined;
+    if (!token) {
+      return next(new Error('Authentication required'));
+    }
+    try {
+      const payload = verifyAuthToken(token);
+      if (payload.userId.startsWith('guest_')) {
+        (socket as SocketWithUser).data.user = {
+          userId: payload.userId,
+          username: `Guest_${payload.userId.slice(-4)}`,
+          rating: 1200,
+          isGuest: true,
+        };
+      } else {
+        const user = await User.findById(payload.userId).select('username rating').lean();
+        if (!user) return next(new Error('User not found'));
+        (socket as SocketWithUser).data.user = {
+          userId: String(user._id),
+          username: user.username,
+          rating: user.rating,
+          isGuest: false,
+        };
+      }
+      next();
+    } catch {
+      next(new Error('Invalid token'));
+    }
+  });
+
   // Periodic cleanup of stale finished games and abandoned rooms
   setInterval(() => {
     const now = Date.now();
 
     // Remove finished/abandoned games older than 30 minutes
     for (const [gameId, game] of activeGames) {
-      if (game.status !== 'active') {
+      if (game.status !== 'active' && (now - game.lastMoveAt > STALE_GAME_CLEANUP_MS)) {
+        clearMoveTimer(game);
         activeGames.delete(gameId);
       }
     }
@@ -472,26 +462,35 @@ export function initializeGameSocket(io: Server): void {
   io.on('connection', (socket: Socket) => {
     const typedSocket = socket as SocketWithUser;
 
-    socket.on('authenticate', async ({ token }: { token: string }) => {
-      try {
-        await authenticateSocket(typedSocket, token);
-      } catch (err) {
-        console.error('authenticate error:', err);
-        socket.emit('error', { message: 'Authentication failed.' });
+    // Rate Limiter: max 10 events per socket per second
+    const eventTimes: number[] = [];
+    socket.use((packet, next) => {
+      const now = Date.now();
+      while (eventTimes.length > 0 && eventTimes[0] < now - 1000) {
+        eventTimes.shift();
       }
+      if (eventTimes.length >= 10) {
+        return next(new Error('Rate limit exceeded (max 10 events/sec)'));
+      }
+      eventTimes.push(now);
+      next();
     });
 
-    socket.on('joinQueue', async ({ token }: { token?: string; rating?: number }) => {
+    socket.on('error', (err) => {
+      socket.emit('serverError', { message: err.message });
+    });
+
+    socket.on('joinQueue', async () => {
       try {
-        const authenticatedUser = typedSocket.data.user ?? (token ? await authenticateSocket(typedSocket, token) : null);
+        const authenticatedUser = typedSocket.data.user;
 
         if (!authenticatedUser) {
-          socket.emit('error', { message: 'You must authenticate before joining the queue.' });
+          socket.emit('serverError', { message: 'You must authenticate before joining the queue.' });
           return;
         }
 
         if (socketToGame.has(socket.id)) {
-          socket.emit('error', { message: 'You are already in an active game.' });
+          socket.emit('serverError', { message: 'You are already in an active game.' });
           return;
         }
 
@@ -509,7 +508,7 @@ export function initializeGameSocket(io: Server): void {
         await tryMatchmake(io);
       } catch (err) {
         console.error('joinQueue error:', err);
-        socket.emit('error', { message: 'Failed to join the queue.' });
+        socket.emit('serverError', { message: 'Failed to join the queue.' });
       }
     });
 
@@ -518,21 +517,33 @@ export function initializeGameSocket(io: Server): void {
       socket.emit('queueLeft');
     });
 
-    socket.on('createRoom', async ({ token }: { token?: string }) => {
+    socket.on('createRoom', async () => {
       try {
-        const authenticatedUser = typedSocket.data.user ?? (token ? await authenticateSocket(typedSocket, token) : null);
+        const authenticatedUser = typedSocket.data.user;
 
         if (!authenticatedUser) {
-          socket.emit('error', { message: 'You must authenticate before creating a room.' });
+          socket.emit('serverError', { message: 'You must authenticate before creating a room.' });
           return;
         }
 
         if (socketToGame.has(socket.id)) {
-          socket.emit('error', { message: 'You are already in an active game.' });
+          socket.emit('serverError', { message: 'You are already in an active game.' });
           return;
         }
 
-        // Remove from any existing room
+        // Limit custom rooms: check if user already has a custom room
+        let userRoomCount = 0;
+        for (const room of customRooms.values()) {
+          if (room.host.userId === authenticatedUser.userId) {
+            userRoomCount++;
+          }
+        }
+        if (userRoomCount >= 1) {
+          socket.emit('serverError', { message: 'You can only host one room at a time.' });
+          return;
+        }
+
+        // Remove from any existing room hosted by this socket
         for (const [code, room] of customRooms) {
           if (room.host.socketId === socket.id) {
             customRooms.delete(code);
@@ -553,21 +564,21 @@ export function initializeGameSocket(io: Server): void {
         socket.emit('roomCreated', { roomCode });
       } catch (err) {
         console.error('createRoom error:', err);
-        socket.emit('error', { message: 'Failed to create room.' });
+        socket.emit('serverError', { message: 'Failed to create room.' });
       }
     });
 
-    socket.on('joinRoom', async ({ token, roomCode }: { token?: string; roomCode: string }) => {
+    socket.on('joinRoom', async ({ roomCode }: { roomCode: string }) => {
       try {
-        const authenticatedUser = typedSocket.data.user ?? (token ? await authenticateSocket(typedSocket, token) : null);
+        const authenticatedUser = typedSocket.data.user;
 
         if (!authenticatedUser) {
-          socket.emit('error', { message: 'You must authenticate before joining a room.' });
+          socket.emit('serverError', { message: 'You must authenticate before joining a room.' });
           return;
         }
 
         if (socketToGame.has(socket.id)) {
-          socket.emit('error', { message: 'You are already in an active game.' });
+          socket.emit('serverError', { message: 'You are already in an active game.' });
           return;
         }
 
@@ -592,10 +603,11 @@ export function initializeGameSocket(io: Server): void {
           joinedAt: Date.now(),
         };
 
+        // Host gets black, joiner gets white
         await createActiveGame(io, room.host, joiner, true);
       } catch (err) {
         console.error('joinRoom error:', err);
-        socket.emit('error', { message: 'Failed to join room.' });
+        socket.emit('serverError', { message: 'Failed to join room.' });
       }
     });
 
@@ -609,8 +621,66 @@ export function initializeGameSocket(io: Server): void {
       }
     });
 
+    socket.on('rejoinGame', ({ gameId }: { gameId: string }) => {
+      try {
+        const authenticatedUser = typedSocket.data.user;
+        if (!authenticatedUser) {
+          socket.emit('serverError', { message: 'Authentication required' });
+          return;
+        }
+
+        const activeGame = activeGames.get(gameId);
+        if (!activeGame || activeGame.status !== 'active') {
+          socket.emit('serverError', { message: 'Game not found or finished' });
+          return;
+        }
+
+        const player = getGamePlayer(activeGame, authenticatedUser.userId);
+        if (!player) {
+          socket.emit('serverError', { message: 'You are not a player in this game' });
+          return;
+        }
+
+        // Reconnect this player
+        player.socketId = socket.id;
+        socketToGame.set(socket.id, gameId);
+        socket.join(gameId);
+
+        // Clear disconnect timer if it exists
+        if (activeGame.disconnectTimer) {
+          clearTimeout(activeGame.disconnectTimer);
+          activeGame.disconnectTimer = undefined;
+        }
+
+        // Notify opponent that player has reconnected
+        socket.to(gameId).emit('opponentReconnected', { userId: authenticatedUser.userId });
+
+        // Send current game state and remaining time
+        const remainingTime = Math.max(0, MOVE_TIMEOUT_MS - (Date.now() - activeGame.lastMoveAt));
+        socket.emit('gameRejoined', {
+          gameId,
+          yourColor: player.color,
+          state: activeGame.state,
+          remainingTime,
+        });
+      } catch (err) {
+        console.error('rejoinGame error:', err);
+        socket.emit('serverError', { message: 'Failed to rejoin game.' });
+      }
+    });
+
     socket.on('makeMove', async ({ gameId, row, col }: { gameId: string; row: number; col: number }) => {
       try {
+        // Validate coordinates
+        if (
+          typeof row !== 'number' || typeof col !== 'number' ||
+          !Number.isInteger(row) || !Number.isInteger(col) ||
+          row < 0 || row > 7 || col < 0 || col > 7
+        ) {
+          socket.emit('invalidMove', { reason: 'Invalid coordinates.' });
+          return;
+        }
+
         const authenticatedUser = typedSocket.data.user;
         const activeGame = activeGames.get(gameId);
 
@@ -648,16 +718,18 @@ export function initializeGameSocket(io: Server): void {
 
         const lastMove = newState.moveHistory[newState.moveHistory.length - 1] ?? null;
 
+        // Reset timer and emit game update with remaining time (full turn time since it starts now)
+        activeGame.lastMoveAt = Date.now();
         io.to(gameId).emit('gameUpdate', {
           state: newState,
           lastMove,
           flipped,
+          remainingTime: MOVE_TIMEOUT_MS,
         });
 
         if (newState.gameStatus === 'finished') {
           await finishGame(io, activeGame, newState.winner, 'board-complete', 'finished');
         } else {
-          // Reset move timer for next player
           startMoveTimer(io, activeGame);
         }
       } catch (err) {
@@ -718,6 +790,7 @@ export function initializeGameSocket(io: Server): void {
         socketToGame.delete(activeGame.blackPlayer.socketId);
         socketToGame.delete(activeGame.whitePlayer.socketId);
 
+        // Swap colors for rematch: the previous white player gets black, and the previous black player gets white
         await createActiveGame(
           io,
           {
@@ -734,6 +807,115 @@ export function initializeGameSocket(io: Server): void {
         );
       } catch (err) {
         console.error('requestRematch error:', err);
+      }
+    });
+
+    // Chat support
+    let lastChatTimestamp = 0;
+    socket.on('chatMessage', ({ gameId, message }: { gameId: string; message: string }) => {
+      try {
+        const now = Date.now();
+        if (now - lastChatTimestamp < 1000) {
+          socket.emit('serverError', { message: 'Chat rate limit exceeded. Please wait.' });
+          return;
+        }
+        lastChatTimestamp = now;
+
+        if (!message || message.trim().length === 0) return;
+        const cleanMessage = filterProfanity(message.slice(0, 200));
+
+        io.to(gameId).emit('chatMessage', {
+          sender: typedSocket.data.user?.username ?? 'System',
+          message: cleanMessage,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error('chatMessage error:', err);
+      }
+    });
+
+    // Draw offer events
+    socket.on('offerDraw', ({ gameId }: { gameId: string }) => {
+      try {
+        const activeGame = activeGames.get(gameId);
+        if (!activeGame || activeGame.status !== 'active') return;
+
+        const player = getGamePlayer(activeGame, typedSocket.data.user!.userId);
+        if (!player) return;
+
+        socket.to(gameId).emit('drawOffered', { offeredBy: player.color });
+      } catch (err) {
+        console.error('offerDraw error:', err);
+      }
+    });
+
+    socket.on('respondDraw', async ({ gameId, accept }: { gameId: string; accept: boolean }) => {
+      try {
+        const activeGame = activeGames.get(gameId);
+        if (!activeGame || activeGame.status !== 'active') return;
+
+        const player = getGamePlayer(activeGame, typedSocket.data.user!.userId);
+        if (!player) return;
+
+        if (accept) {
+          await finishGame(io, activeGame, 'draw', 'draw-agreement', 'finished');
+        } else {
+          socket.to(gameId).emit('drawDeclined');
+        }
+      } catch (err) {
+        console.error('respondDraw error:', err);
+      }
+    });
+
+    // Spectator support
+    socket.on('spectateGame', ({ gameId }: { gameId: string }) => {
+      try {
+        const activeGame = activeGames.get(gameId);
+        if (!activeGame) {
+          socket.emit('serverError', { message: 'Game not found.' });
+          return;
+        }
+        socket.join(gameId);
+        socket.emit('spectateSuccess', {
+          gameId,
+          state: activeGame.state,
+          blackPlayer: {
+            username: activeGame.blackPlayer.username,
+            rating: activeGame.blackPlayer.rating,
+          },
+          whitePlayer: {
+            username: activeGame.whitePlayer.username,
+            rating: activeGame.whitePlayer.rating,
+          },
+        });
+      } catch (err) {
+        console.error('spectateGame error:', err);
+      }
+    });
+
+    socket.on('listActiveGames', () => {
+      try {
+        const games = Array.from(activeGames.values())
+          .filter((g) => g.status === 'active')
+          .map((g) => ({
+            gameId: g.gameId,
+            blackPlayer: {
+              username: g.blackPlayer.username,
+              rating: g.blackPlayer.rating,
+            },
+            whitePlayer: {
+              username: g.whitePlayer.username,
+              rating: g.whitePlayer.rating,
+            },
+            score: {
+              black: g.state.blackScore,
+              white: g.state.whiteScore,
+            },
+            currentPlayer: g.state.currentPlayer,
+          }));
+        socket.emit('activeGamesList', games);
+      } catch (err) {
+        console.error('listActiveGames error:', err);
       }
     });
 
@@ -762,9 +944,20 @@ export function initializeGameSocket(io: Server): void {
 
         const disconnectedPlayer =
           activeGame.blackPlayer.socketId === socket.id ? activeGame.blackPlayer : activeGame.whitePlayer;
-        const winner: Player = disconnectedPlayer.color === 'black' ? 'white' : 'black';
+        const remainingPlayer =
+          activeGame.blackPlayer.socketId === socket.id ? activeGame.whitePlayer : activeGame.blackPlayer;
 
-        await finishGame(io, activeGame, winner, 'disconnect-forfeit', 'abandoned');
+        // Set a 30-second disconnect timer before forfeiting
+        const timer = setTimeout(async () => {
+          if (activeGame.status === 'active') {
+            const winner: Player = disconnectedPlayer.color === 'black' ? 'white' : 'black';
+            await finishGame(io, activeGame, winner, 'disconnect-forfeit', 'abandoned');
+          }
+        }, 30_000);
+        activeGame.disconnectTimer = timer;
+
+        const remainingSocket = io.sockets.sockets.get(remainingPlayer.socketId);
+        remainingSocket?.emit('opponentDisconnected', { userId: disconnectedPlayer.userId });
       } catch (err) {
         console.error('disconnect cleanup error:', err);
       }

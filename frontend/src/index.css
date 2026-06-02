@@ -6,8 +6,13 @@
   color-scheme: dark;
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(156, 163, 175, 0.25) transparent;
+}
+
 body {
-  @apply min-h-screen bg-gray-900 text-gray-100 antialiased;
+  @apply min-h-screen bg-gray-950 text-gray-100 antialiased;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   background-image:
     radial-gradient(circle at top, rgba(34, 197, 94, 0.12), transparent 30%),
@@ -23,9 +28,10 @@ body {
   @apply min-h-screen;
 }
 
-/* Scrollbar styling */
+/* Scrollbar styling for WebKit browsers */
 ::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -56,8 +62,27 @@ body {
     animation: slideDown 300ms ease-out forwards;
   }
 
+  .animate-slide-up {
+    animation: slideUp 400ms ease-out forwards;
+  }
+
   .animate-toast {
     animation: toastIn 300ms ease-out forwards, toastOut 300ms ease-in 1.7s forwards;
+  }
+
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-gray-900;
+  }
+
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(31, 41, 55, 0.1) 0%,
+      rgba(75, 85, 99, 0.25) 50%,
+      rgba(31, 41, 55, 0.1) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.6s infinite linear;
   }
 }
 
@@ -115,6 +140,17 @@ body {
   }
 }
 
+@keyframes slideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes toastIn {
   0% {
     opacity: 0;
@@ -132,5 +168,14 @@ body {
   }
   100% {
     opacity: 0;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
   }
 }

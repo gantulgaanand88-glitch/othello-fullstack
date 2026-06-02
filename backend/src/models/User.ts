@@ -10,6 +10,10 @@ export interface IUser {
   wins: number;
   losses: number;
   draws: number;
+  consentGiven: Date | null;
+  consentVersion: string;
+  ageConfirmed: boolean;
+  lastLogin: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -37,6 +41,7 @@ const userSchema = new Schema<IUser, UserModel, UserMethods>(
       unique: true,
       lowercase: true,
       trim: true,
+      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Invalid email format'],
     },
     passwordHash: {
       type: String,
@@ -67,10 +72,25 @@ const userSchema = new Schema<IUser, UserModel, UserMethods>(
       default: 0,
       min: 0,
     },
+    consentGiven: {
+      type: Date,
+      default: null,
+    },
+    consentVersion: {
+      type: String,
+      default: '',
+    },
+    ageConfirmed: {
+      type: Boolean,
+      default: false,
+    },
+    lastLogin: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
-    versionKey: false,
   },
 );
 

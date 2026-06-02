@@ -1,13 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
-import { fetchLeaderboard, loginAsGuest, setAuthToken } from '../services/api';
-import type { AuthUser, LeaderboardEntry } from '../types';
-
-interface LandingPageProps {
-  user: AuthUser | null;
-  onOpenAuth: (mode?: 'login' | 'register') => void;
-}
+import { fetchLeaderboard } from '../services/api';
+import type { LeaderboardEntry } from '../types';
+import { useAuth } from '../context/AuthContext';
 
 const FEATURES = [
   {
@@ -32,8 +28,11 @@ const FEATURES = [
   },
 ];
 
-export function LandingPage({ user, onOpenAuth }: LandingPageProps) {
+export function LandingPage() {
+  const { user, openAuthModal, loginAsGuest } = useAuth();
+  const navigate = useNavigate();
   const [leaders, setLeaders] = useState<LeaderboardEntry[]>([]);
+  const [loadingGuest, setLoadingGuest] = useState(false);
 
   useEffect(() => {
     fetchLeaderboard()
@@ -42,23 +41,21 @@ export function LandingPage({ user, onOpenAuth }: LandingPageProps) {
   }, []);
 
   const handlePlayAsGuest = async () => {
+    setLoadingGuest(true);
     try {
-      const response = await loginAsGuest();
-      setAuthToken(response.token);
-      window.localStorage.setItem(
-        'othello-auth',
-        JSON.stringify(response),
-      );
-      window.location.href = '/game';
+      await loginAsGuest();
+      navigate('/game');
     } catch {
-      onOpenAuth('login');
+      openAuthModal('login');
+    } finally {
+      setLoadingGuest(false);
     }
   };
 
   return (
     <div className="space-y-8">
       <section className="grid gap-8 lg:grid-cols-[1.3fr_0.7fr]">
-        <div className="rounded-[2rem] border border-gray-800 bg-gradient-to-br from-gray-800 via-gray-900 to-green-950/70 p-8 shadow-2xl lg:p-12">
+        <div className="rounded-[2rem] border border-gray-800 bg-gradient-to-br from-gray-800 via-gray-900 to-green-950/70 p-8 shadow-2xl lg:p-12 text-left">
           <p className="text-sm uppercase tracking-[0.35em] text-green-400">Competitive Othello</p>
           <h1 className="mt-4 max-w-2xl text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
             Live ranked Reversi with instant matchmaking, clean analysis, and tournament-level polish.
@@ -70,7 +67,7 @@ export function LandingPage({ user, onOpenAuth }: LandingPageProps) {
           <div className="mt-8 flex flex-col gap-4 sm:flex-row">
             <Link
               to="/game"
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-500 hover:shadow-lg hover:shadow-green-500/20"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-500 hover:shadow-lg hover:shadow-green-500/20 active:scale-95"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
@@ -81,24 +78,25 @@ export function LandingPage({ user, onOpenAuth }: LandingPageProps) {
               <>
                 <button
                   type="button"
-                  onClick={() => onOpenAuth('register')}
-                  className="inline-flex items-center justify-center rounded-full border border-gray-700 px-6 py-3 text-sm font-semibold text-gray-200 transition hover:border-green-500/50 hover:bg-green-500/10 hover:text-white"
+                  onClick={() => openAuthModal('register')}
+                  className="inline-flex items-center justify-center rounded-full border border-gray-700 px-6 py-3 text-sm font-semibold text-gray-200 transition hover:border-green-500/50 hover:bg-green-500/10 hover:text-white active:scale-95"
                 >
                   Create Account
                 </button>
                 <button
                   type="button"
                   onClick={handlePlayAsGuest}
-                  className="inline-flex items-center justify-center rounded-full border border-gray-600 bg-gray-700/50 px-6 py-3 text-sm font-semibold text-gray-200 transition hover:bg-gray-700"
+                  disabled={loadingGuest}
+                  className="inline-flex items-center justify-center rounded-full border border-gray-600 bg-gray-700/50 px-6 py-3 text-sm font-semibold text-gray-200 transition hover:bg-gray-700 disabled:opacity-60 active:scale-95"
                 >
-                  ⚡ Play as Guest
+                  {loadingGuest ? 'Starting...' : '⚡ Play as Guest'}
                 </button>
               </>
             ) : null}
           </div>
         </div>
 
-        <div className="rounded-[2rem] border border-gray-800 bg-gray-800/80 p-8 shadow-xl backdrop-blur">
+        <div className="rounded-[2rem] border border-gray-800 bg-gray-800/80 p-8 shadow-xl backdrop-blur text-left">
           <p className="text-sm uppercase tracking-[0.25em] text-green-400">Your Profile</p>
           {user ? (
             <div className="mt-5 space-y-5">
@@ -134,7 +132,7 @@ export function LandingPage({ user, onOpenAuth }: LandingPageProps) {
               <div className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-green-500/10 text-2xl">
                 🏆
               </div>
-              <p className="text-sm text-gray-300">
+              <p className="text-sm text-gray-300 leading-relaxed">
                 Sign in to unlock ranked matchmaking, persistent ratings, and your match history.
               </p>
             </div>
@@ -147,16 +145,16 @@ export function LandingPage({ user, onOpenAuth }: LandingPageProps) {
         {FEATURES.map((feature) => (
           <div
             key={feature.title}
-            className="rounded-2xl border border-gray-800 bg-gray-800/60 p-6 shadow-lg transition hover:border-green-500/30 hover:bg-gray-800/80"
+            className="rounded-2xl border border-gray-800 bg-gray-800/60 p-6 shadow-lg transition hover:border-green-500/30 hover:bg-gray-800/80 text-left"
           >
             <span className="text-2xl">{feature.icon}</span>
             <h3 className="mt-3 font-semibold text-white">{feature.title}</h3>
-            <p className="mt-2 text-sm text-gray-400">{feature.desc}</p>
+            <p className="mt-2 text-sm text-gray-400 leading-relaxed">{feature.desc}</p>
           </div>
         ))}
       </section>
 
-      <section className="rounded-[2rem] border border-gray-800 bg-gray-800/80 p-8 shadow-xl backdrop-blur">
+      <section className="rounded-[2rem] border border-gray-800 bg-gray-800/80 p-8 shadow-xl backdrop-blur text-left">
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-sm uppercase tracking-[0.25em] text-green-400">Top Players</p>
@@ -167,7 +165,7 @@ export function LandingPage({ user, onOpenAuth }: LandingPageProps) {
           </Link>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5 text-left">
           {leaders.length === 0 ? (
             <p className="col-span-full py-4 text-center text-sm text-gray-500">
               No ranked players yet. Be the first!
@@ -184,7 +182,7 @@ export function LandingPage({ user, onOpenAuth }: LandingPageProps) {
               <p className="text-sm text-gray-500">
                 {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '#'}{leader.position}
               </p>
-              <h3 className="mt-3 text-xl font-semibold text-white">{leader.username}</h3>
+              <h3 className="mt-3 text-xl font-semibold text-white truncate">{leader.username}</h3>
               <p className="mt-1 text-sm text-gray-400">{leader.rank}</p>
               <p className="mt-5 text-3xl font-semibold text-green-400">{leader.rating}</p>
             </div>
@@ -194,6 +192,10 @@ export function LandingPage({ user, onOpenAuth }: LandingPageProps) {
 
       {/* Footer */}
       <footer className="border-t border-gray-800 py-8 text-center text-xs text-gray-600">
+        <div className="flex justify-center gap-4 mb-2">
+          <Link to="/privacy" className="hover:text-gray-400 underline">Privacy Policy</Link>
+          <Link to="/terms" className="hover:text-gray-400 underline">Terms of Service</Link>
+        </div>
         <p>Othello Arena &bull; Built with React, Socket.io, MongoDB &bull; © {new Date().getFullYear()}</p>
       </footer>
     </div>

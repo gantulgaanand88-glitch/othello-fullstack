@@ -11,12 +11,15 @@ const router = Router();
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USERNAME_REGEX = /^[a-zA-Z0-9_-]+$/;
 
+// Pre-computed dummy hash for timing-safe login
+const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', 12);
+
 router.post('/guest', (_req, res) => {
   const guestId = `guest_${crypto.randomBytes(8).toString('hex')}`;
   const guestNumber = Math.floor(1000 + Math.random() * 9000);
   const username = `Guest_${guestNumber}`;
 
-  const token = signAuthToken(guestId);
+  const token = signAuthToken(guestId, true);
 
   res.json({
     token,
@@ -37,14 +40,20 @@ router.post('/guest', (_req, res) => {
 
 router.post('/register', async (req, res) => {
   try {
-    const { username, email, password } = req.body as {
+    const { username, email, password, ageConfirmed } = req.body as {
       username?: string;
       email?: string;
       password?: string;
+      ageConfirmed?: boolean;
     };
 
     if (!username || !email || !password) {
       res.status(400).json({ message: 'Username, email, and password are required.' });
+      return;
+    }
+
+    if (ageConfirmed !== true) {
+      res.status(400).json({ message: 'You must confirm that you are of legal age.' });
       return;
     }
 
@@ -66,8 +75,8 @@ router.post('/register', async (req, res) => {
       return;
     }
 
-    if (password.length < 6) {
-      res.status(400).json({ message: 'Password must be at least 6 characters long.' });
+    if (password.length < 8) {
+      res.status(400).json({ message: 'Password must be at least 8 characters long.' });
       return;
     }
 
@@ -90,6 +99,9 @@ router.post('/register', async (req, res) => {
       username: trimmedUsername,
       email: trimmedEmail,
       passwordHash,
+      consentGiven: new Date(),
+      consentVersion: '1.0',
+      ageConfirmed: true,
     });
 
     const token = signAuthToken(user.id);
@@ -129,6 +141,8 @@ router.post('/login', async (req, res) => {
     const user = await User.findOne({ email: email.toLowerCase() });
 
     if (!user) {
+      // Timing-safe: always hash even when user not found to prevent timing attacks
+      await bcrypt.compare(password, DUMMY_HASH);
       res.status(401).json({ message: 'Invalid email or password.' });
       return;
     }
@@ -139,6 +153,9 @@ router.post('/login', async (req, res) => {
       res.status(401).json({ message: 'Invalid email or password.' });
       return;
     }
+
+    // Update lastLogin timestamp
+    await User.findByIdAndUpdate(user.id, { $set: { lastLogin: new Date() } });
 
     const token = signAuthToken(user.id);
 

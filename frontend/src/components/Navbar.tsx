@@ -1,19 +1,19 @@
-import { useState } from 'react';
-import { Link, NavLink } from 'react-router-dom';
-
-import type { AuthUser } from '../types';
-
-interface NavbarProps {
-  user: AuthUser | null;
-  onLogin: () => void;
-  onLogout: () => void;
-}
+import { useState, useEffect } from 'react';
+import { Link, NavLink, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `text-sm transition ${isActive ? 'text-green-400 font-medium' : 'text-gray-300 hover:text-white'}`;
 
-export function Navbar({ user, onLogin, onLogout }: NavbarProps) {
+export function Navbar() {
+  const { user, openAuthModal, logout } = useAuth();
+  const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Close the mobile dropdown menu whenever the pathname changes
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
 
   return (
     <header className="sticky top-0 z-40 border-b border-gray-800 bg-gray-900/90 backdrop-blur">
@@ -22,12 +22,13 @@ export function Navbar({ user, onLogin, onLogout }: NavbarProps) {
           <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-green-500 to-green-700 text-lg font-bold text-white shadow-lg shadow-green-500/20">
             O
           </span>
-          <div>
-            <p className="text-lg font-semibold text-white">Othello Arena</p>
-            <p className="text-xs uppercase tracking-[0.25em] text-gray-500">Ranked Multiplayer</p>
+          <div className="text-left">
+            <p className="text-lg font-semibold text-white leading-tight">Othello Arena</p>
+            <p className="text-[10px] uppercase tracking-[0.25em] text-gray-500">Ranked Multiplayer</p>
           </div>
         </Link>
 
+        {/* Desktop Nav */}
         <nav className="hidden items-center gap-6 md:flex">
           <NavLink to="/" end className={navLinkClass}>
             Home
@@ -38,22 +39,38 @@ export function Navbar({ user, onLogin, onLogout }: NavbarProps) {
           <NavLink to="/leaderboard" className={navLinkClass}>
             Leaderboard
           </NavLink>
+          <NavLink to="/spectate" className={navLinkClass}>
+            Spectate
+          </NavLink>
+          {user && !user.isGuest && (
+            <>
+              <NavLink to="/history" className={navLinkClass}>
+                History
+              </NavLink>
+              <NavLink to={`/profile/${user.username}`} className={navLinkClass}>
+                Profile
+              </NavLink>
+            </>
+          )}
         </nav>
 
         <div className="flex items-center gap-3">
           {user ? (
             <>
-              <div className="hidden rounded-full border border-gray-700 bg-gray-800 px-4 py-2 text-sm text-gray-300 sm:block">
+              <Link
+                to={user.isGuest ? '#' : `/profile/${user.username}`}
+                className="hidden rounded-full border border-gray-700 bg-gray-800 px-4 py-2 text-sm text-gray-300 sm:block transition hover:border-gray-650 hover:bg-gray-750"
+              >
                 <span className="font-medium text-white">{user.username}</span>
                 {user.isGuest ? (
                   <span className="ml-1 text-gray-500">(Guest)</span>
                 ) : (
                   <span className="ml-1 text-green-400">• {user.rating}</span>
                 )}
-              </div>
+              </Link>
               <button
                 type="button"
-                onClick={onLogout}
+                onClick={logout}
                 className="rounded-full border border-gray-600 px-4 py-2 text-sm font-medium text-gray-200 transition hover:border-red-400/50 hover:bg-red-500/10 hover:text-red-300"
               >
                 {user.isGuest ? 'Leave' : 'Logout'}
@@ -62,18 +79,18 @@ export function Navbar({ user, onLogin, onLogout }: NavbarProps) {
           ) : (
             <button
               type="button"
-              onClick={onLogin}
+              onClick={() => openAuthModal('login')}
               className="rounded-full bg-green-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-green-500 hover:shadow-lg hover:shadow-green-500/20"
             >
               Login / Register
             </button>
           )}
 
-          {/* Mobile hamburger */}
+          {/* Mobile hamburger toggle */}
           <button
             type="button"
             onClick={() => setMobileOpen(!mobileOpen)}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-700 text-gray-300 transition hover:bg-gray-800 hover:text-white md:hidden"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-700 text-gray-300 transition hover:bg-gray-800 hover:text-white md:hidden focus:outline-none focus:ring-2 focus:ring-green-550"
             aria-label="Toggle menu"
           >
             {mobileOpen ? (
@@ -90,34 +107,41 @@ export function Navbar({ user, onLogin, onLogout }: NavbarProps) {
       </div>
 
       {/* Mobile nav dropdown */}
-      {mobileOpen ? (
+      {mobileOpen && (
         <div className="border-t border-gray-800 bg-gray-900/95 px-4 py-4 backdrop-blur animate-slide-down md:hidden">
           <nav className="flex flex-col gap-3">
-            <NavLink
-              to="/"
-              end
-              className={navLinkClass}
-              onClick={() => setMobileOpen(false)}
-            >
+            <NavLink to="/" end className={navLinkClass}>
               Home
             </NavLink>
-            <NavLink
-              to="/game"
-              className={navLinkClass}
-              onClick={() => setMobileOpen(false)}
-            >
+            <NavLink to="/game" className={navLinkClass}>
               Play
             </NavLink>
-            <NavLink
-              to="/leaderboard"
-              className={navLinkClass}
-              onClick={() => setMobileOpen(false)}
-            >
+            <NavLink to="/leaderboard" className={navLinkClass}>
               Leaderboard
             </NavLink>
+            <NavLink to="/spectate" className={navLinkClass}>
+              Spectate
+            </NavLink>
+            {user && !user.isGuest && (
+              <>
+                <NavLink to="/history" className={navLinkClass}>
+                  History
+                </NavLink>
+                <NavLink to={`/profile/${user.username}`} className={navLinkClass}>
+                  Profile
+                </NavLink>
+              </>
+            )}
+            <div className="h-px bg-gray-800 my-2" />
+            <Link to="/privacy" className="text-xs text-gray-500 hover:text-gray-400">
+              Privacy Policy
+            </Link>
+            <Link to="/terms" className="text-xs text-gray-500 hover:text-gray-400">
+              Terms of Service
+            </Link>
           </nav>
         </div>
-      ) : null}
+      )}
     </header>
   );
 }

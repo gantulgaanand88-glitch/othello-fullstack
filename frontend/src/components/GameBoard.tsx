@@ -16,7 +16,8 @@ function coordinateKey(row: number, col: number): string {
 }
 
 const COL_LABELS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-const ROW_LABELS = ['1', '2', '3', '4', '5', '6', '7', '8'];
+// Standard Othello/Chess: row 8 is at the top, row 1 is at the bottom
+const ROW_LABELS = ['8', '7', '6', '5', '4', '3', '2', '1'];
 
 /**
  * Compute a stagger delay for each flipped piece based on its
@@ -56,6 +57,47 @@ export function GameBoard({ state, yourColor, lastMove, flipped, onSquareClick }
     return computeWaveDelays(flipped, lastMove);
   }, [flipped, lastMove]);
 
+  // Handles arrow-key grid navigation for accessibility (a11y)
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const buttons = Array.from(
+      e.currentTarget.querySelectorAll('button')
+    ) as HTMLButtonElement[];
+    const active = document.activeElement as HTMLButtonElement;
+    const activeIndex = buttons.indexOf(active);
+
+    if (activeIndex === -1) return;
+
+    const row = Math.floor(activeIndex / 8);
+    const col = activeIndex % 8;
+
+    let nextRow = row;
+    let nextCol = col;
+
+    switch (e.key) {
+      case 'ArrowUp':
+        nextRow = Math.max(0, row - 1);
+        e.preventDefault();
+        break;
+      case 'ArrowDown':
+        nextRow = Math.min(7, row + 1);
+        e.preventDefault();
+        break;
+      case 'ArrowLeft':
+        nextCol = Math.max(0, col - 1);
+        e.preventDefault();
+        break;
+      case 'ArrowRight':
+        nextCol = Math.min(7, col + 1);
+        e.preventDefault();
+        break;
+      default:
+        return;
+    }
+
+    const nextIndex = nextRow * 8 + nextCol;
+    buttons[nextIndex]?.focus();
+  };
+
   return (
     <div className="rounded-3xl border border-gray-700 bg-gray-800/80 p-3 shadow-board backdrop-blur sm:p-4">
       <div className="mb-3 flex items-center justify-between px-1 text-xs uppercase tracking-[0.3em] text-gray-400">
@@ -86,6 +128,7 @@ export function GameBoard({ state, yourColor, lastMove, flipped, onSquareClick }
         <div
           role="grid"
           aria-label="Othello game board"
+          onKeyDown={handleKeyDown}
           className="grid flex-1 grid-cols-8 overflow-hidden rounded-2xl border border-black/20"
         >
           {state.board.map((rowCells, rowIndex) =>
@@ -95,6 +138,8 @@ export function GameBoard({ state, yourColor, lastMove, flipped, onSquareClick }
               return (
                 <Square
                   key={key}
+                  row={rowIndex}
+                  col={colIndex}
                   cell={cell}
                   isLegalMove={legalMoveSet.has(key)}
                   isLastMove={lastMove?.row === rowIndex && lastMove.col === colIndex}

@@ -7,18 +7,31 @@ import http from 'http';
 import mongoose from 'mongoose';
 import { rateLimit } from 'express-rate-limit';
 import { Server } from 'socket.io';
+import compression from 'compression';
+import pinoHttp from 'pino-http';
 
 import authRoutes from './routes/auth';
 import gameRoutes from './routes/game';
 import leaderboardRoutes from './routes/leaderboard';
+import privacyRoutes from './routes/privacy';
+import consentRoutes from './routes/consent';
+import reportRoutes from './routes/report';
+import historyRoutes from './routes/history';
+import profileRoutes from './routes/profile';
+import { validateJwtSecret } from './middleware/auth';
 import { initializeGameSocket } from './sockets/gameSocket';
 
 const app = express();
 const server = http.createServer(app);
 
 const clientUrl = process.env.CLIENT_URL ?? 'http://localhost:5173';
-
 const allowedOrigins = clientUrl.split(',').map((u) => u.trim());
+
+// Request logger
+app.use(pinoHttp());
+
+// Response compression
+app.use(compression());
 
 // Security headers
 app.use(helmet());
@@ -42,13 +55,36 @@ const authLimiter = rateLimit({
   message: { message: 'Too many requests. Please try again later.' },
 });
 
+// Rate-limit game endpoints: 30 requests per minute per IP
+const gameLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many game actions. Please try again later.' },
+});
+
+// Rate-limit leaderboard endpoints: 60 requests per minute per IP
+const leaderboardLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many leaderboard requests. Please try again later.' },
+});
+
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok' });
+  res.json({ status: mongoose.connection.readyState === 1 ? 'ok' : 'degraded' });
 });
 
 app.use('/api/auth', authLimiter, authRoutes);
-app.use('/api/game', gameRoutes);
-app.use('/api/leaderboard', leaderboardRoutes);
+app.use('/api/game', gameLimiter, gameRoutes);
+app.use('/api/leaderboard', leaderboardLimiter, leaderboardRoutes);
+app.use('/api/privacy', privacyRoutes);
+app.use('/api/consent', consentRoutes);
+app.use('/api/report', reportRoutes);
+app.use('/api/history', historyRoutes);
+app.use('/api/profile', profileRoutes);
 
 const io = new Server(server, {
   cors: {
@@ -74,6 +110,9 @@ async function startServer(): Promise<void> {
   });
 }
 
+// Startup validation for JWT_SECRET (must be configured and >= 32 chars)
+validateJwtSecret();
+
 startServer().catch((error) => {
   console.error('Failed to start server:', error);
   process.exit(1);
@@ -82,10 +121,12 @@ startServer().catch((error) => {
 // Graceful shutdown — Render sends SIGTERM during deploys
 function gracefulShutdown(signal: string): void {
   console.log(`Received ${signal}. Shutting down gracefully...`);
-  server.close(() => {
-    mongoose.connection.close(false).then(() => {
-      console.log('Server and database connections closed.');
-      process.exit(0);
+  io.close(() => {
+    server.close(() => {
+      mongoose.connection.close(false).then(() => {
+        console.log('Server and database connections closed.');
+        process.exit(0);
+      });
     });
   });
   // Force exit after 10 seconds
