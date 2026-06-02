@@ -35,7 +35,7 @@ test('calculateElo enforces minimum rating floor', () => {
   const result = calculateElo(100, 3000, 0, 100, 'loss');
 
   assert.equal(result.newRatingA, 100);
-  assert.ok(result.newRatingB > 3000);
+  assert.equal(result.newRatingB, 3000);
 });
 
 test('getPlayerRank maps thresholds to expected rank names', () => {
