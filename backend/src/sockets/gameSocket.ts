@@ -9,6 +9,7 @@ import {
   processMove,
 } from '../gameEngine/othello';
 import { verifyAuthToken } from '../middleware/auth';
+import { computeBotMove } from '../gameEngine/bot';
 import { Game } from '../models/Game';
 import { User } from '../models/User';
 import { getEloUpdateOps } from '../utils/elo';
@@ -28,6 +29,8 @@ interface QueueEntry extends AuthenticatedSocketData {
 interface GamePlayer extends AuthenticatedSocketData {
   socketId: string;
   color: Player;
+  isBot?: boolean;
+  botDifficulty?: '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10';
 }
 
 interface ActiveGame {
@@ -177,8 +180,72 @@ function clearMoveTimer(activeGame: ActiveGame): void {
   }
 }
 
-async function createActiveGame(io: Server, blackEntry: QueueEntry, whiteEntry: QueueEntry, isCustomRoom = false): Promise<void> {
-  const hasGuest = !!(blackEntry.isGuest || whiteEntry.isGuest);
+function triggerBotMove(io: Server, activeGame: ActiveGame): void {
+  if (activeGame.status !== 'active') return;
+
+  const currentPlayerColor = activeGame.state.currentPlayer;
+  const botPlayer = currentPlayerColor === 'black' ? activeGame.blackPlayer : activeGame.whitePlayer;
+
+  if (!botPlayer.isBot || !botPlayer.botDifficulty) return;
+
+  // Simulate a thinking delay between 600ms and 1200ms
+  const delay = Math.floor(Math.random() * (1200 - 600 + 1)) + 600;
+
+  setTimeout(async () => {
+    try {
+      const currentActiveGame = activeGames.get(activeGame.gameId);
+      if (!currentActiveGame || currentActiveGame.status !== 'active') return;
+      if (currentActiveGame.state.currentPlayer !== currentPlayerColor) return;
+
+      const [r, c] = computeBotMove(
+        currentActiveGame.state.board,
+        currentPlayerColor,
+        botPlayer.botDifficulty!
+      );
+
+      const { newState, flipped, valid } = processMove(currentActiveGame.state, r, c);
+      if (!valid) {
+        console.error('Bot attempted an invalid move:', r, c);
+        return;
+      }
+
+      currentActiveGame.state = newState;
+      await persistMoves(currentActiveGame);
+
+      const lastMove = newState.moveHistory[newState.moveHistory.length - 1] ?? null;
+
+      currentActiveGame.lastMoveAt = Date.now();
+      io.to(currentActiveGame.gameId).emit('gameUpdate', {
+        state: newState,
+        lastMove,
+        flipped,
+        remainingTime: MOVE_TIMEOUT_MS,
+      });
+
+      if (newState.gameStatus === 'finished') {
+        await finishGame(io, currentActiveGame, newState.winner, 'board-complete', 'finished');
+      } else {
+        startMoveTimer(io, currentActiveGame);
+        
+        const nextPlayerColor = newState.currentPlayer;
+        const nextPlayerObj = nextPlayerColor === 'black' ? currentActiveGame.blackPlayer : currentActiveGame.whitePlayer;
+        if (nextPlayerObj.isBot) {
+          triggerBotMove(io, currentActiveGame);
+        }
+      }
+    } catch (err) {
+      console.error('Error during bot move execution:', err);
+    }
+  }, delay);
+}
+
+async function createActiveGame(
+  io: Server,
+  blackEntry: QueueEntry & { isBot?: boolean; botDifficulty?: '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' },
+  whiteEntry: QueueEntry & { isBot?: boolean; botDifficulty?: '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' },
+  isCustomRoom = false,
+): Promise<void> {
+  const hasGuest = !!(blackEntry.isGuest || whiteEntry.isGuest || blackEntry.isBot || whiteEntry.isBot);
   let dbGameId = '';
 
   if (!hasGuest) {
@@ -219,11 +286,15 @@ async function createActiveGame(io: Server, blackEntry: QueueEntry, whiteEntry: 
   };
 
   activeGames.set(activeGame.gameId, activeGame);
-  socketToGame.set(blackEntry.socketId, activeGame.gameId);
-  socketToGame.set(whiteEntry.socketId, activeGame.gameId);
+  if (blackEntry.socketId !== 'bot_socket') socketToGame.set(blackEntry.socketId, activeGame.gameId);
+  if (whiteEntry.socketId !== 'bot_socket') socketToGame.set(whiteEntry.socketId, activeGame.gameId);
 
   emitGameFound(io, activeGame);
   startMoveTimer(io, activeGame);
+
+  if (activeGame.blackPlayer.isBot) {
+    triggerBotMove(io, activeGame);
+  }
 }
 
 async function tryMatchmake(io: Server): Promise<void> {
@@ -517,6 +588,69 @@ export function initializeGameSocket(io: Server): void {
       socket.emit('queueLeft');
     });
 
+    socket.on('startBotGame', async ({ difficulty, playerColor }: { difficulty: '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10'; playerColor: 'black' | 'white' | 'random' }) => {
+      try {
+        const authenticatedUser = typedSocket.data.user;
+
+        if (!authenticatedUser) {
+          socket.emit('serverError', { message: 'You must authenticate before starting a game.' });
+          return;
+        }
+
+        if (socketToGame.has(socket.id)) {
+          socket.emit('serverError', { message: 'You are already in an active game.' });
+          return;
+        }
+
+        let humanColor: Player = 'black';
+        if (playerColor === 'random') {
+          humanColor = Math.random() < 0.5 ? 'black' : 'white';
+        } else {
+          humanColor = playerColor;
+        }
+
+        const botDetails: Record<string, { rating: number; name: string }> = {
+          '1': { rating: 200, name: 'Novice Nebula' },
+          '2': { rating: 400, name: 'Comet Cadet' },
+          '3': { rating: 600, name: 'Meteor Scout' },
+          '4': { rating: 900, name: 'Gravity Guard' },
+          '5': { rating: 1200, name: 'Orbit Officer' },
+          '6': { rating: 1500, name: 'Proton Pilot' },
+          '7': { rating: 1700, name: 'Sly Sentinel' },
+          '8': { rating: 1900, name: 'Nebula Knight' },
+          '9': { rating: 2100, name: 'Galaxy Guardian' },
+          '10': { rating: 2400, name: 'Grandmaster Orion' },
+        };
+
+        const botInfo = botDetails[difficulty] || { rating: 1200, name: 'Computer' };
+        const botRating = botInfo.rating;
+        const botUsername = `${botInfo.name} (${botInfo.rating})`;
+
+        const humanPlayerEntry = {
+          ...authenticatedUser,
+          socketId: socket.id,
+          joinedAt: Date.now(),
+        };
+
+        const botPlayerEntry = {
+          userId: `bot_${difficulty}`,
+          username: botUsername,
+          rating: botRating,
+          isGuest: true,
+          socketId: 'bot_socket',
+          joinedAt: Date.now(),
+        };
+
+        const blackEntry = humanColor === 'black' ? humanPlayerEntry : { ...botPlayerEntry, isBot: true, botDifficulty: difficulty };
+        const whiteEntry = humanColor === 'white' ? humanPlayerEntry : { ...botPlayerEntry, isBot: true, botDifficulty: difficulty };
+
+        await createActiveGame(io, blackEntry, whiteEntry);
+      } catch (err) {
+        console.error('startBotGame error:', err);
+        socket.emit('serverError', { message: 'Failed to start bot game.' });
+      }
+    });
+
     socket.on('createRoom', async () => {
       try {
         const authenticatedUser = typedSocket.data.user;
@@ -731,6 +865,11 @@ export function initializeGameSocket(io: Server): void {
           await finishGame(io, activeGame, newState.winner, 'board-complete', 'finished');
         } else {
           startMoveTimer(io, activeGame);
+          const nextPlayerColor = newState.currentPlayer;
+          const nextPlayerObj = nextPlayerColor === 'black' ? activeGame.blackPlayer : activeGame.whitePlayer;
+          if (nextPlayerObj.isBot) {
+            triggerBotMove(io, activeGame);
+          }
         }
       } catch (err) {
         console.error('makeMove error:', err);
@@ -779,16 +918,21 @@ export function initializeGameSocket(io: Server): void {
 
         const opponent =
           player.userId === activeGame.blackPlayer.userId ? activeGame.whitePlayer : activeGame.blackPlayer;
-        const opponentSocket = io.sockets.sockets.get(opponent.socketId);
-        opponentSocket?.emit('rematchRequested');
+        
+        if (opponent.isBot) {
+          activeGame.rematchVotes.add(opponent.userId);
+        } else {
+          const opponentSocket = io.sockets.sockets.get(opponent.socketId);
+          opponentSocket?.emit('rematchRequested');
+        }
 
         if (activeGame.rematchVotes.size < 2) {
           return;
         }
 
         activeGames.delete(activeGame.gameId);
-        socketToGame.delete(activeGame.blackPlayer.socketId);
-        socketToGame.delete(activeGame.whitePlayer.socketId);
+        if (activeGame.blackPlayer.socketId !== 'bot_socket') socketToGame.delete(activeGame.blackPlayer.socketId);
+        if (activeGame.whitePlayer.socketId !== 'bot_socket') socketToGame.delete(activeGame.whitePlayer.socketId);
 
         // Swap colors for rematch: the previous white player gets black, and the previous black player gets white
         await createActiveGame(
@@ -939,6 +1083,14 @@ export function initializeGameSocket(io: Server): void {
         socketToGame.delete(socket.id);
 
         if (!activeGame || activeGame.status !== 'active') {
+          return;
+        }
+
+        const isBotGame = !!(activeGame.blackPlayer.isBot || activeGame.whitePlayer.isBot);
+        if (isBotGame) {
+          clearMoveTimer(activeGame);
+          activeGame.status = 'abandoned';
+          activeGames.delete(gameId);
           return;
         }
 

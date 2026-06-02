@@ -42,6 +42,9 @@ export function GamePage() {
   const [rematchRequestedByOpponent, setRematchRequestedByOpponent] = useState(false);
   const [showCopiedToast, setShowCopiedToast] = useState(false);
   const [resignConfirmOpen, setResignConfirmOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'ranked' | 'bot' | 'friend'>('ranked');
+  const [selectedBotLevel, setSelectedBotLevel] = useState<string>('5');
+  const [selectedColor, setSelectedColor] = useState<'black' | 'white' | 'random'>('random');
 
   // Live countdown timer state (re-synced with turn changes)
   const [remainingTime, setRemainingTime] = useState(5 * 60_000);
@@ -353,6 +356,14 @@ export function GamePage() {
 
   const yourScore = yourColor === 'black' ? gameState?.blackScore ?? 2 : gameState?.whiteScore ?? 2;
   const opponentScore = yourColor === 'black' ? gameState?.whiteScore ?? 2 : gameState?.blackScore ?? 2;
+  const isBotGame = !!opponent?.id?.startsWith('bot_');
+
+  const handleStartBotGame = () => {
+    emit('startBotGame', {
+      difficulty: selectedBotLevel,
+      playerColor: selectedColor,
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -398,76 +409,203 @@ export function GamePage() {
       )}
 
       {!gameState && !queueJoinedAt && !waitingForOpponent ? (
-        <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr] text-left">
+        <section className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr] text-left">
           <div className="space-y-6">
-            <div className="rounded-[2rem] border border-gray-800 bg-gradient-to-br from-gray-800 via-gray-900 to-green-950/70 p-8 shadow-2xl">
-              <p className="text-sm uppercase tracking-[0.25em] text-green-400">
-                {user.isGuest ? 'Quick Play' : 'Ranked Queue'}
-              </p>
-              <h1 className="mt-4 text-4xl font-semibold text-white">
-                {user.isGuest ? 'Find an opponent and play.' : 'Find a live opponent and start climbing.'}
-              </h1>
-              <p className="mt-4 max-w-xl text-gray-300 leading-relaxed">
-                {user.isGuest
-                  ? 'Guest games are casual and do not affect ELO ratings. Create an account to play ranked.'
-                  : 'Matchmaking pairs you by rating, expands search range after ten seconds, and records all ranked games.'}
-              </p>
+            {/* Tab Bar */}
+            <div className="flex border-b border-gray-800">
               <button
                 type="button"
-                onClick={handleJoinQueue}
-                className="mt-8 inline-flex items-center gap-2 rounded-full bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-500 hover:shadow-lg hover:shadow-green-500/20 active:scale-95"
+                onClick={() => setActiveTab('ranked')}
+                className={`border-b-2 px-6 py-3.5 text-sm font-semibold tracking-wide transition active:scale-95 ${
+                  activeTab === 'ranked'
+                    ? 'border-green-500 text-green-400'
+                    : 'border-transparent text-gray-400 hover:text-gray-250'
+                }`}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
-                </svg>
-                {user.isGuest ? 'Find Match' : 'Find Ranked Match'}
+                🏆 Ranked Play
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('bot')}
+                className={`border-b-2 px-6 py-3.5 text-sm font-semibold tracking-wide transition active:scale-95 ${
+                  activeTab === 'bot'
+                    ? 'border-green-500 text-green-400'
+                    : 'border-transparent text-gray-400 hover:text-gray-250'
+                }`}
+              >
+                🤖 Play vs Computer
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('friend')}
+                className={`border-b-2 px-6 py-3.5 text-sm font-semibold tracking-wide transition active:scale-95 ${
+                  activeTab === 'friend'
+                    ? 'border-green-500 text-green-400'
+                    : 'border-transparent text-gray-400 hover:text-gray-250'
+                }`}
+              >
+                👥 Play vs Friend
               </button>
             </div>
 
-            {/* Custom Room Section */}
-            <div className="rounded-[2rem] border border-gray-800 bg-gray-800/80 p-8 shadow-xl">
-              <p className="text-sm uppercase tracking-[0.25em] text-green-400">Private Room</p>
-              <h2 className="mt-2 text-2xl font-semibold text-white">Play with a friend</h2>
-              <p className="mt-3 text-sm text-gray-300 leading-relaxed">
-                Create a room and share the code, or enter a code to join an existing room.
-              </p>
-
-              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            {/* Ranked Tab */}
+            {activeTab === 'ranked' && (
+              <div className="rounded-[2rem] border border-gray-800 bg-gradient-to-br from-gray-800 via-gray-900 to-green-950/70 p-8 shadow-2xl animate-fade-in">
+                <p className="text-sm uppercase tracking-[0.25em] text-green-400">
+                  {user.isGuest ? 'Quick Play' : 'Ranked Queue'}
+                </p>
+                <h1 className="mt-4 text-4xl font-semibold text-white">
+                  {user.isGuest ? 'Find an opponent and play.' : 'Find a live opponent and start climbing.'}
+                </h1>
+                <p className="mt-4 max-w-xl text-gray-300 leading-relaxed">
+                  {user.isGuest
+                    ? 'Guest games are casual and do not affect ELO ratings. Create an account to play ranked.'
+                    : 'Matchmaking pairs you by rating, expands search range after ten seconds, and records all ranked games.'}
+                </p>
                 <button
                   type="button"
-                  onClick={handleCreateRoom}
-                  className="rounded-full bg-green-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-green-500 active:scale-95"
+                  onClick={handleJoinQueue}
+                  className="mt-8 inline-flex items-center gap-2 rounded-full bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-500 hover:shadow-lg hover:shadow-green-500/20 active:scale-95"
                 >
-                  Create Room
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                  </svg>
+                  {user.isGuest ? 'Find Match' : 'Find Ranked Match'}
                 </button>
-                <div className="flex flex-1 gap-2">
-                  <input
-                    type="text"
-                    value={joinCode}
-                    onChange={(e) => {
-                      setJoinCode(e.target.value.toUpperCase());
-                      setRoomError(null);
-                    }}
-                    placeholder="Enter room code"
-                    maxLength={6}
-                    className="flex-1 rounded-full border border-gray-700 bg-gray-900 px-4 py-3 text-center text-sm font-mono tracking-[0.3em] text-white uppercase outline-none transition focus:border-green-500 focus:ring-1 focus:ring-green-500/30"
-                  />
+              </div>
+            )}
+
+            {/* Friend Tab */}
+            {activeTab === 'friend' && (
+              <div className="rounded-[2rem] border border-gray-800 bg-gray-800/80 p-8 shadow-xl animate-fade-in">
+                <p className="text-sm uppercase tracking-[0.25em] text-green-400">Private Room</p>
+                <h2 className="mt-2 text-2xl font-semibold text-white">Play with a friend</h2>
+                <p className="mt-3 text-sm text-gray-300 leading-relaxed">
+                  Create a room and share the code, or enter a code to join an existing room.
+                </p>
+
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                   <button
                     type="button"
-                    onClick={handleJoinRoom}
-                    className="rounded-full border border-gray-600 px-5 py-3 text-sm font-semibold text-gray-200 transition hover:border-green-500 hover:text-white active:scale-95"
+                    onClick={handleCreateRoom}
+                    className="rounded-full bg-green-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-green-500 active:scale-95"
                   >
-                    Join
+                    Create Room
                   </button>
+                  <div className="flex flex-1 gap-2">
+                    <input
+                      type="text"
+                      value={joinCode}
+                      onChange={(e) => {
+                        setJoinCode(e.target.value.toUpperCase());
+                        setRoomError(null);
+                      }}
+                      placeholder="Enter room code"
+                      maxLength={6}
+                      className="flex-1 rounded-full border border-gray-700 bg-gray-900 px-4 py-3 text-center text-sm font-mono tracking-[0.3em] text-white uppercase outline-none transition focus:border-green-500 focus:ring-1 focus:ring-green-500/30"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleJoinRoom}
+                      className="rounded-full border border-gray-600 px-5 py-3 text-sm font-semibold text-gray-200 transition hover:border-green-500 hover:text-white active:scale-95"
+                    >
+                      Join
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              {roomError ? (
-                <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm text-red-300">
-                  {roomError}
+                {roomError ? (
+                  <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm text-red-300">
+                    {roomError}
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            {/* Bot Tab */}
+            {activeTab === 'bot' && (
+              <div className="rounded-[2rem] border border-gray-800 bg-gray-800/80 p-8 shadow-xl space-y-8 animate-fade-in">
+                <div>
+                  <p className="text-sm uppercase tracking-[0.25em] text-green-400">Casual Mode</p>
+                  <h2 className="mt-2 text-2xl font-semibold text-white">Play vs Computer</h2>
+                  <p className="mt-2 text-sm text-gray-300 leading-relaxed">
+                    Hone your skills against our custom engine. Select a difficulty below.
+                  </p>
                 </div>
-              ) : null}
-            </div>
+
+                {/* Color Selector */}
+                <div className="space-y-3">
+                  <span className="text-sm font-semibold text-gray-300 block">Choose Your Color</span>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    {[
+                      { value: 'black', label: '⚫ Black (Plays First)' },
+                      { value: 'white', label: '⚪ White (Plays Second)' },
+                      { value: 'random', label: '🎲 Random' }
+                    ].map((col) => (
+                      <button
+                        key={col.value}
+                        type="button"
+                        onClick={() => setSelectedColor(col.value as any)}
+                        className={`flex-1 rounded-full border px-5 py-3 text-sm font-semibold transition active:scale-95 ${
+                          selectedColor === col.value
+                            ? 'border-green-500 bg-green-500/10 text-green-400'
+                            : 'border-gray-700 bg-gray-900/50 text-gray-305 hover:border-gray-600'
+                        }`}
+                      >
+                        {col.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Difficulty Levels Card Grid */}
+                <div className="space-y-3">
+                  <span className="text-sm font-semibold text-gray-300 block">Select AI Difficulty Level</span>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {[
+                      { level: '1', name: 'Novice Nebula', rating: 200, color: 'text-green-400 border-green-500/20', desc: 'Level 1: 85% random moves' },
+                      { level: '2', name: 'Comet Cadet', rating: 400, color: 'text-green-400 border-green-500/20', desc: 'Level 2: 50% random moves' },
+                      { level: '3', name: 'Meteor Scout', rating: 600, color: 'text-yellow-400 border-yellow-500/20', desc: 'Level 3: Greedy capture strategy' },
+                      { level: '4', name: 'Gravity Guard', rating: 900, color: 'text-yellow-400 border-yellow-500/20', desc: 'Level 4: Minimax lookahead depth 1' },
+                      { level: '5', name: 'Orbit Officer', rating: 1200, color: 'text-blue-400 border-blue-500/20', desc: 'Level 5: Minimax lookahead depth 2' },
+                      { level: '6', name: 'Proton Pilot', rating: 1500, color: 'text-blue-400 border-blue-500/20', desc: 'Level 6: Minimax lookahead depth 3' },
+                      { level: '7', name: 'Sly Sentinel', rating: 1700, color: 'text-orange-400 border-orange-500/20', desc: 'Level 7: Corner-seeking lookahead depth 4' },
+                      { level: '8', name: 'Nebula Knight', rating: 1900, color: 'text-orange-400 border-orange-500/20', desc: 'Level 8: Defensive search depth 5' },
+                      { level: '9', name: 'Galaxy Guardian', rating: 2100, color: 'text-purple-400 border-purple-500/20', desc: 'Level 9: Expert lookahead depth 6' },
+                      { level: '10', name: 'Grandmaster Orion', rating: 2400, color: 'text-red-400 border-red-500/20', desc: 'Level 10: Complete lookahead depth 6' }
+                    ].map((bot) => (
+                      <button
+                        key={bot.level}
+                        type="button"
+                        onClick={() => setSelectedBotLevel(bot.level)}
+                        className={`rounded-2xl border p-4 text-left transition active:scale-[0.98] ${
+                          selectedBotLevel === bot.level
+                            ? 'border-green-500 bg-green-500/10 shadow-lg shadow-green-500/5'
+                            : 'border-gray-800 bg-gray-900/60 hover:border-gray-700 hover:bg-gray-900/80'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={`text-sm font-semibold ${bot.color.split(' ')[0]}`}>{bot.name}</span>
+                          <span className="rounded-full bg-gray-800 px-2.5 py-0.5 text-xs font-bold font-mono text-gray-300 border border-gray-700">
+                            {bot.rating}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-400 leading-normal">{bot.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Start Game Button */}
+                <button
+                  type="button"
+                  onClick={handleStartBotGame}
+                  className="w-full rounded-full bg-green-600 py-4 text-sm font-semibold text-white transition hover:bg-green-500 hover:shadow-lg hover:shadow-green-500/20 active:scale-95 flex justify-center items-center gap-2"
+                >
+                  ⚡ Start Game Against Computer
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="rounded-[2rem] border border-gray-800 bg-gray-800/80 p-8 shadow-xl">
@@ -581,7 +719,7 @@ export function GamePage() {
                   remainingMs={gameState.currentPlayer !== yourColor ? remainingTime : 5 * 60_000}
                   isActive={gameState.currentPlayer !== yourColor && gameState.gameStatus === 'playing'}
                 />
-                {!user.isGuest && (
+                {!user.isGuest && !isBotGame && (
                   <button
                     type="button"
                     onClick={() => setReportModalOpen(true)}
@@ -660,14 +798,38 @@ export function GamePage() {
             ) : null}
           </div>
 
-          {/* Right Column: Move History & In-Game Live Chat */}
+          {/* Right Column: Move History & In-Game Live Chat / AI Dashboard */}
           <div className="space-y-6">
             <MoveHistory moves={gameState.moveHistory} />
-            <GameChat
-              messages={chatMessages}
-              onSend={handleSendChat}
-              opponentUsername={opponent.username}
-            />
+            {isBotGame ? (
+              <div className="flex h-[320px] flex-col justify-between rounded-3xl border border-gray-700 bg-gray-800/80 p-5 shadow-lg backdrop-blur text-left">
+                <div className="space-y-3 animate-fade-in">
+                  <div className="flex items-center gap-2 border-b border-gray-700/60 pb-2">
+                    <span className="text-lg">🤖</span>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-white">AI Engine Info</span>
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-semibold text-green-400">{opponent.username}</h4>
+                    <p className="text-xs text-gray-450 font-mono">Opponent Type: Local AI</p>
+                  </div>
+                  <div className="rounded-xl bg-gray-900/40 p-3 border border-gray-850 text-xs text-gray-350 leading-relaxed font-sans">
+                    <strong>Search Model:</strong> Uses alpha-beta minimax lookahead with dynamic weights evaluation.
+                  </div>
+                  <p className="text-xs text-gray-400 leading-relaxed italic">
+                    💡 <strong>Tip:</strong> Corners are static and cannot be flipped. Prioritize taking corners and force the bot to play in the adjacent X/C squares.
+                  </p>
+                </div>
+                <div className="text-[10px] text-gray-500 text-center border-t border-gray-700/40 pt-2 font-mono">
+                  Casual Match • ELO Updates Disabled
+                </div>
+              </div>
+            ) : (
+              <GameChat
+                messages={chatMessages}
+                onSend={handleSendChat}
+                opponentUsername={opponent.username}
+              />
+            )}
           </div>
         </section>
       ) : null}
