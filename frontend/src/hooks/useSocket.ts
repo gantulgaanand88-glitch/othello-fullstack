@@ -21,12 +21,17 @@ export function useSocket() {
     if (!socketRef.current) {
       socketRef.current = io(import.meta.env.VITE_SOCKET_URL ?? 'http://localhost:4000', {
         autoConnect: false,
-        transports: ['websocket'],
+        transports: ['polling', 'websocket'],
         reconnection: true,
         reconnectionAttempts: 10,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         auth: { token }, // Pass token directly in handshake auth
+      });
+
+      socketRef.current.on('connect_error', (err) => {
+        console.error('[useSocket] Connection error:', err.message);
+        setIsConnected(false);
       });
 
       socketRef.current.on('connect', () => {

@@ -25,7 +25,7 @@ const app = express();
 const server = http.createServer(app);
 
 const clientUrl = process.env.CLIENT_URL ?? 'http://localhost:5173';
-const allowedOrigins = clientUrl.split(',').map((u) => u.trim());
+const allowedOrigins = clientUrl.split(',').map((u) => u.trim().replace(/\/$/, ''));
 
 // Request logger
 app.use(pinoHttp());
