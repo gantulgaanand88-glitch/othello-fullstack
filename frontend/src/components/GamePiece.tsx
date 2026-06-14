@@ -77,73 +77,74 @@ export const GamePiece = React.memo(function GamePiece({
   const glintId    = `${uid}-glint`;
 
   return (
-    <g
-      transform={`translate(${cx}, ${cy})`}
-      style={{
-        transform: `translate(${cx}px, ${cy}px) scaleX(${scaleX}) scale(${scale})`,
-        transformOrigin: `${cx}px ${cy}px`,
-        transition:
-          phase === 'flip-out' ? 'transform 275ms cubic-bezier(0.4,0,1,1)' :
-          phase === 'flip-in'  ? 'transform 275ms cubic-bezier(0,0,0.6,1)' :
-          phase === 'placed'   ? 'transform 250ms cubic-bezier(0.34,1.56,0.64,1)' :
-          'none',
-      }}
-    >
-      <defs>
-        {/* Sphere gradient */}
-        <radialGradient id={gradId} cx="35%" cy="28%" r="65%" gradientUnits="objectBoundingBox">
-          {isDark ? (
-            <>
-              <stop offset="0%"   stopColor="#303030" />
-              <stop offset="60%"  stopColor="#111111" />
-              <stop offset="100%" stopColor="#090909" />
-            </>
-          ) : (
-            <>
-              <stop offset="0%"   stopColor="#f7f3ec" />
-              <stop offset="60%"  stopColor="#ddd5c5" />
-              <stop offset="100%" stopColor="#c4baa9" />
-            </>
-          )}
-        </radialGradient>
+    <g transform={`translate(${cx}, ${cy})`}>
+      <g
+        style={{
+          transform: `scaleX(${scaleX}) scale(${scale})`,
+          transformOrigin: '0px 0px',
+          transition:
+            phase === 'flip-out' ? 'transform 275ms cubic-bezier(0.4,0,1,1)' :
+            phase === 'flip-in'  ? 'transform 275ms cubic-bezier(0,0,0.6,1)' :
+            phase === 'placed'   ? 'transform 250ms cubic-bezier(0.34,1.56,0.64,1)' :
+            'none',
+        }}
+      >
+        <defs>
+          {/* Sphere gradient */}
+          <radialGradient id={gradId} cx="35%" cy="28%" r="65%" gradientUnits="objectBoundingBox">
+            {isDark ? (
+              <>
+                <stop offset="0%"   stopColor="#303030" />
+                <stop offset="60%"  stopColor="#111111" />
+                <stop offset="100%" stopColor="#090909" />
+              </>
+            ) : (
+              <>
+                <stop offset="0%"   stopColor="#f7f3ec" />
+                <stop offset="60%"  stopColor="#ddd5c5" />
+                <stop offset="100%" stopColor="#c4baa9" />
+              </>
+            )}
+          </radialGradient>
 
-        {/* Specular glint */}
-        <radialGradient id={glintId} cx="28%" cy="22%" r="40%" gradientUnits="objectBoundingBox">
-          <stop offset="0%"  stopColor="white" stopOpacity={isDark ? 0.07 : 0.65} />
-          <stop offset="100%" stopColor="white" stopOpacity="0" />
-        </radialGradient>
-      </defs>
+          {/* Specular glint */}
+          <radialGradient id={glintId} cx="28%" cy="22%" r="40%" gradientUnits="objectBoundingBox">
+            <stop offset="0%"  stopColor="white" stopOpacity={isDark ? 0.07 : 0.65} />
+            <stop offset="100%" stopColor="white" stopOpacity="0" />
+          </radialGradient>
+        </defs>
 
-      {/* Drop shadow circle */}
-      <ellipse
-        cx="0" cy={r * 0.18}
-        rx={r * 0.9} ry={r * 0.2}
-        fill="rgba(0,0,0,0.55)"
-        style={{ filter: 'blur(3px)' }}
-      />
+        {/* Drop shadow circle */}
+        <ellipse
+          cx="0" cy={r * 0.18}
+          rx={r * 0.9} ry={r * 0.2}
+          fill="rgba(0,0,0,0.55)"
+          style={{ filter: 'blur(3px)' }}
+        />
 
-      {/* Main sphere */}
-      <circle
-        cx="0" cy="0"
-        r={r}
-        fill={`url(#${gradId})`}
-      />
+        {/* Main sphere */}
+        <circle
+          cx="0" cy="0"
+          r={r}
+          fill={`url(#${gradId})`}
+        />
 
-      {/* Specular highlight */}
-      <circle
-        cx="0" cy="0"
-        r={r}
-        fill={`url(#${glintId})`}
-      />
+        {/* Specular highlight */}
+        <circle
+          cx="0" cy="0"
+          r={r}
+          fill={`url(#${glintId})`}
+        />
 
-      {/* Rim light (subtle) */}
-      <circle
-        cx="0" cy="0"
-        r={r}
-        fill="none"
-        stroke={isDark ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.35)'}
-        strokeWidth="0.8"
-      />
+        {/* Rim light (subtle) */}
+        <circle
+          cx="0" cy="0"
+          r={r}
+          fill="none"
+          stroke={isDark ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.35)'}
+          strokeWidth="0.8"
+        />
+      </g>
     </g>
   );
 });

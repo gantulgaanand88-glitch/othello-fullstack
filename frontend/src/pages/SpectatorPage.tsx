@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useSocket } from '../hooks/useSocket';
 import { useAuth } from '../context/AuthContext';
-import GameBoard from '../components/GameBoard';
+import SvgBoard from '../components/SvgBoard';
 import type { GameState } from '../types';
 
 interface ActiveGame {
@@ -92,12 +92,14 @@ export function SpectatorPage() {
           </button>
         </div>
 
-        <div className="mx-auto max-w-lg">
-          <GameBoard
-            state={gameState}
-            yourColor={null}
+        <div className="mx-auto max-w-lg aspect-square">
+          <SvgBoard
+            board={gameState.board}
+            legalMoves={[]}
             lastMove={null}
-            flipped={[]}
+            flippedPieces={[]}
+            currentPlayer={gameState.currentPlayer}
+            yourColor={null}
             onSquareClick={() => {/* Read-only for spectators */}}
           />
         </div>

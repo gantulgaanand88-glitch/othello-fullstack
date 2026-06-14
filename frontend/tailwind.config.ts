@@ -37,6 +37,102 @@ const colors = {
   'board-line':  '#172417', // grid line — barely visible
   'board-alt':   '#0f1c0f', // alternating cell (subtle checkerboard)
   'board-legal': '#c9a84c20', // legal move highlight
+
+  // ── Custom standard color families (mapped to custom premium tones) ───
+  gray: {
+    50:  '#f8f7f4',
+    100: '#f0ece4', // ink
+    200: '#d5cfc4',
+    300: '#b8b2a5',
+    350: '#a39c90', // support for text-gray-350
+    400: '#9b9486',
+    450: '#8e8a80', // support for text-gray-450
+    500: '#7a7670', // ink-muted
+    600: '#53504c',
+    650: '#464340', // support for border-gray-650
+    700: '#3d3b37', // border-strong
+    750: '#2d2b28', // support for border-gray-750
+    800: '#1f1e1b', // elevated
+    850: '#161614', // surface
+    900: '#0e0e0e', // base
+    950: '#070707',
+  },
+  green: {
+    50:  '#f0fbf6',
+    100: '#dcf7ec',
+    200: '#bdf0d9',
+    300: '#8ee6c1',
+    400: '#5fd3a3',
+    500: '#4caf82', // success
+    550: '#42a377', // support for hover:bg-green-550
+    600: '#3e8f69',
+    700: '#327255',
+    800: '#275842',
+    900: '#142b1f',
+    950: '#0b1a13',
+  },
+  red: {
+    50:  '#fdf2f2',
+    100: '#fde2e2',
+    200: '#fca5a5',
+    300: '#f87171',
+    400: '#ef4444',
+    500: '#c94c4c', // danger
+    600: '#a83c3c',
+    700: '#853030',
+    800: '#632424',
+    900: '#421818',
+  },
+  yellow: {
+    50:  '#fefdf0',
+    100: '#fdfade',
+    200: '#fbf4be',
+    300: '#f8eb96',
+    400: '#e5ca7a',
+    500: '#c9a84c', // gold
+    550: '#b8983d', // support for hover
+    600: '#a38435',
+    700: '#7e6423',
+    800: '#5b4716',
+    900: '#382a0b',
+    950: '#261c05',
+  },
+  blue: {
+    50:  '#f0f6fd',
+    100: '#dceafd',
+    200: '#b8d5fb',
+    300: '#8cb9f8',
+    400: '#5b98f4',
+    500: '#4c7fc9', // info
+    600: '#3c64a0',
+    700: '#2f4e7d',
+    800: '#213759',
+    900: '#142136',
+  },
+  orange: {
+    50:  '#fff7ed',
+    100: '#ffedd5',
+    200: '#fed7aa',
+    300: '#fdba74',
+    400: '#f97316',
+    500: '#c87c3e',
+    600: '#a15e2a',
+    700: '#7b451d',
+    800: '#562f13',
+    900: '#311909',
+  },
+  purple: {
+    50:  '#faf5ff',
+    100: '#f3e8ff',
+    200: '#e9d5ff',
+    300: '#d8b4fe',
+    400: '#c084fc',
+    500: '#9b6bbf',
+    600: '#7e529e',
+    700: '#613c7c',
+    800: '#46275c',
+    900: '#2b143c',
+  }
 };
 
 export default {

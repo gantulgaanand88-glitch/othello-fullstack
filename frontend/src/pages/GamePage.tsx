@@ -379,7 +379,7 @@ export function GamePage() {
     <div className="space-y-6">
       {/* Connection status indicator */}
       {!isConnected && gameState ? (
-        <div className="flex items-center gap-2 rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-255 justify-center">
+        <div className="flex items-center gap-2 rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-400 justify-center">
           <span className="h-2.5 w-2.5 rounded-full bg-yellow-400 animate-pulse-soft" />
           Reconnecting to server...
         </div>
