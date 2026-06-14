@@ -76,29 +76,85 @@ export const Square = React.memo(function Square({
       type="button"
       onClick={onClick}
       aria-label={label}
-      className={[
-        'relative aspect-square w-full overflow-hidden border border-black/20 transition-colors duration-200 outline-none focus:ring-2 focus:ring-inset focus:ring-green-400',
-        'bg-[#2d5a27] hover:bg-[#35692e]',
-        isLastMove ? 'ring-2 ring-inset ring-yellow-400/80' : '',
-      ].join(' ')}
-      style={{ perspective: '200px' }}
+      style={{
+        position: 'relative',
+        aspectRatio: '1',
+        width: '100%',
+        background: isLastMove
+          ? 'rgba(0,229,160,0.06)'
+          : 'var(--board-bg)',
+        border: '1px solid var(--board-line)',
+        outline: 'none',
+        cursor: cell ? 'default' : isLegalMove ? 'pointer' : 'default',
+        transition: 'background 0.15s',
+        perspective: '200px',
+        // Subtle last-move accent: top-left corner highlight
+        boxShadow: isLastMove
+          ? 'inset 2px 2px 0 0 rgba(0,229,160,0.4)'
+          : 'none',
+      }}
+      onMouseEnter={(e) => {
+        if (isLegalMove && !cell) {
+          (e.currentTarget as HTMLButtonElement).style.background =
+            'rgba(0,229,160,0.05)';
+        }
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = isLastMove
+          ? 'rgba(0,229,160,0.06)'
+          : 'var(--board-bg)';
+      }}
     >
+      {/* Legal move indicator — minimal dot */}
       {isLegalMove && !cell ? (
-        <span className="absolute inset-0 flex items-center justify-center">
-          <span className="h-3 w-3 rounded-full bg-white/30 transition-transform duration-200 hover:scale-125" />
+        <span
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <span
+            style={{
+              width: '18%',
+              aspectRatio: '1',
+              borderRadius: '50%',
+              background: 'var(--accent)',
+              opacity: 0.35,
+            }}
+          />
         </span>
       ) : null}
 
+      {/* Piece */}
       {cell ? (
-        <span className="absolute inset-0 flex items-center justify-center">
+        <span
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
           <span
-            className={[
-              'h-[72%] w-[72%] rounded-full transition-shadow duration-300',
-              pieceColor === 'black'
-                ? 'bg-gradient-to-br from-zinc-700 via-zinc-900 to-zinc-950 shadow-[0_2px_6px_rgba(0,0,0,0.6),inset_0_1px_2px_rgba(255,255,255,0.1)]'
-                : 'bg-gradient-to-br from-white via-gray-50 to-gray-200 shadow-[0_2px_6px_rgba(0,0,0,0.3),inset_0_1px_2px_rgba(255,255,255,0.8)]',
-              animating ? 'animate-piece-flip-3d' : '',
-            ].join(' ')}
+            className={animating ? 'animate-piece-flip-3d' : ''}
+            style={{
+              width: '68%',
+              aspectRatio: '1',
+              borderRadius: '50%',
+              background:
+                pieceColor === 'black'
+                  ? 'radial-gradient(circle at 35% 35%, #2a2a2a, #080808)'
+                  : 'radial-gradient(circle at 35% 35%, #f5f0e8, #c8bfaf)',
+              boxShadow:
+                pieceColor === 'black'
+                  ? '0 2px 8px rgba(0,0,0,0.8), inset 0 1px 2px rgba(255,255,255,0.06)'
+                  : '0 2px 8px rgba(0,0,0,0.5), inset 0 1px 3px rgba(255,255,255,0.6)',
+              transition: 'box-shadow 0.2s',
+            }}
           />
         </span>
       ) : null}

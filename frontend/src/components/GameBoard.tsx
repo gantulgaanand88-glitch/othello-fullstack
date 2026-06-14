@@ -98,38 +98,80 @@ export function GameBoard({ state, yourColor, lastMove, flipped, onSquareClick }
     buttons[nextIndex]?.focus();
   };
 
+  const currentPlayerDot =
+    state.currentPlayer === 'black'
+      ? 'var(--piece-dark)'
+      : 'var(--piece-light)';
+
   return (
-    <div className="rounded-3xl border border-gray-700 bg-gray-800/80 p-3 shadow-board backdrop-blur sm:p-4">
-      <div className="mb-3 flex items-center justify-between px-1 text-xs uppercase tracking-[0.3em] text-gray-400">
-        <span>Othello Arena</span>
-        <span className="flex items-center gap-2">
+    <div className="board-shell">
+      {/* Board header */}
+      <div className="board-topbar">
+        <span
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.6rem',
+            letterSpacing: '0.2em',
+            textTransform: 'uppercase',
+            color: 'var(--text-tertiary)',
+          }}
+        >
+          Othello Arena
+        </span>
+        <span
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.6rem',
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: 'var(--text-secondary)',
+          }}
+        >
           <span
-            className={[
-              'inline-block h-2.5 w-2.5 rounded-full',
-              state.currentPlayer === 'black'
-                ? 'bg-gradient-to-br from-zinc-600 to-zinc-950'
-                : 'bg-gradient-to-br from-white to-gray-300',
-            ].join(' ')}
+            style={{
+              display: 'inline-block',
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: currentPlayerDot,
+              border: state.currentPlayer === 'white' ? '1px solid #555' : 'none',
+            }}
           />
           {state.currentPlayer} to move
         </span>
       </div>
 
       {/* Column labels */}
-      <div className="mb-1 grid grid-cols-8 gap-0 px-0">
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(8, 1fr)',
+          paddingLeft: '0',
+          marginBottom: '4px',
+        }}
+      >
         {COL_LABELS.map((label) => (
-          <span key={label} className="text-center text-[10px] font-medium text-gray-600 uppercase">
+          <span key={label} className="board-coordinate">
             {label}
           </span>
         ))}
       </div>
 
-      <div className="flex">
+      {/* Board + row labels */}
+      <div style={{ display: 'flex', alignItems: 'stretch' }}>
         <div
           role="grid"
           aria-label="Othello game board"
           onKeyDown={handleKeyDown}
-          className="grid flex-1 grid-cols-8 overflow-hidden rounded-2xl border border-black/20"
+          style={{
+            flex: 1,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(8, 1fr)',
+            border: '1px solid var(--rule)',
+          }}
         >
           {state.board.map((rowCells, rowIndex) =>
             rowCells.map((cell, colIndex) => {
@@ -153,9 +195,16 @@ export function GameBoard({ state, yourColor, lastMove, flipped, onSquareClick }
         </div>
 
         {/* Row labels */}
-        <div className="ml-1.5 flex flex-col justify-around">
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-around',
+            marginLeft: '6px',
+          }}
+        >
           {ROW_LABELS.map((label) => (
-            <span key={label} className="text-[10px] font-medium text-gray-600">
+            <span key={label} className="board-coordinate" style={{ textAlign: 'left' }}>
               {label}
             </span>
           ))}

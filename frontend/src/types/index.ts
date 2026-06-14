@@ -57,6 +57,7 @@ export interface OpponentSummary {
   id: string;
   username: string;
   rating: number;
+  rank?: string;
 }
 
 export interface RecentGame {

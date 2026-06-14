@@ -13,6 +13,39 @@ import { computeBotMove } from '../gameEngine/bot';
 import { Game } from '../models/Game';
 import { User } from '../models/User';
 import { getEloUpdateOps } from '../utils/elo';
+import { z } from 'zod';
+
+const botDifficultySchema = z.enum(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']);
+const playerColorSchema = z.enum(['black', 'white', 'random']);
+
+const startBotGameSchema = z.object({
+  difficulty: botDifficultySchema,
+  playerColor: playerColorSchema,
+});
+
+const joinRoomSchema = z.object({
+  roomCode: z.string().min(1).max(20),
+});
+
+const gameIdSchema = z.object({
+  gameId: z.string().min(1),
+});
+
+const makeMoveSchema = z.object({
+  gameId: z.string().min(1),
+  row: z.number().int().min(0).max(7),
+  col: z.number().int().min(0).max(7),
+});
+
+const chatMessageSchema = z.object({
+  gameId: z.string().min(1),
+  message: z.string().min(1).max(200),
+});
+
+const respondDrawSchema = z.object({
+  gameId: z.string().min(1),
+  accept: z.boolean(),
+});
 
 interface AuthenticatedSocketData {
   userId: string;
@@ -203,11 +236,12 @@ function triggerBotMove(io: Server, activeGame: ActiveGame): void {
         botPlayer.botDifficulty!
       );
 
-      const { newState, flipped, valid } = processMove(currentActiveGame.state, r, c);
-      if (!valid) {
+      const moveResult = processMove(currentActiveGame.state, r, c);
+      if (!moveResult.valid) {
         console.error('Bot attempted an invalid move:', r, c);
         return;
       }
+      const { newState, flipped } = moveResult;
 
       currentActiveGame.state = newState;
       await persistMoves(currentActiveGame);
@@ -551,6 +585,17 @@ export function initializeGameSocket(io: Server): void {
       socket.emit('serverError', { message: err.message });
     });
 
+    const handleSocketError = (err: unknown, eventName: string) => {
+      if (err instanceof z.ZodError) {
+        const zodErr = err as any;
+        const msg = zodErr.errors?.[0]?.message || zodErr.issues?.[0]?.message || 'Invalid payload';
+        socket.emit('serverError', { message: `Validation error in ${eventName}: ${msg}` });
+      } else {
+        console.error(`${eventName} error:`, err);
+        socket.emit('serverError', { message: `Failed to process ${eventName}.` });
+      }
+    };
+
     socket.on('joinQueue', async () => {
       try {
         const authenticatedUser = typedSocket.data.user;
@@ -588,8 +633,9 @@ export function initializeGameSocket(io: Server): void {
       socket.emit('queueLeft');
     });
 
-    socket.on('startBotGame', async ({ difficulty, playerColor }: { difficulty: '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10'; playerColor: 'black' | 'white' | 'random' }) => {
+    socket.on('startBotGame', async (payload) => {
       try {
+        const { difficulty, playerColor } = startBotGameSchema.parse(payload);
         const authenticatedUser = typedSocket.data.user;
 
         if (!authenticatedUser) {
@@ -646,8 +692,7 @@ export function initializeGameSocket(io: Server): void {
 
         await createActiveGame(io, blackEntry, whiteEntry);
       } catch (err) {
-        console.error('startBotGame error:', err);
-        socket.emit('serverError', { message: 'Failed to start bot game.' });
+        handleSocketError(err, 'startBotGame');
       }
     });
 
@@ -702,8 +747,9 @@ export function initializeGameSocket(io: Server): void {
       }
     });
 
-    socket.on('joinRoom', async ({ roomCode }: { roomCode: string }) => {
+    socket.on('joinRoom', async (payload) => {
       try {
+        const { roomCode } = joinRoomSchema.parse(payload);
         const authenticatedUser = typedSocket.data.user;
 
         if (!authenticatedUser) {
@@ -740,8 +786,7 @@ export function initializeGameSocket(io: Server): void {
         // Host gets black, joiner gets white
         await createActiveGame(io, room.host, joiner, true);
       } catch (err) {
-        console.error('joinRoom error:', err);
-        socket.emit('serverError', { message: 'Failed to join room.' });
+        handleSocketError(err, 'joinRoom');
       }
     });
 
@@ -755,8 +800,9 @@ export function initializeGameSocket(io: Server): void {
       }
     });
 
-    socket.on('rejoinGame', ({ gameId }: { gameId: string }) => {
+    socket.on('rejoinGame', async (payload) => {
       try {
+        const { gameId } = gameIdSchema.parse(payload);
         const authenticatedUser = typedSocket.data.user;
         if (!authenticatedUser) {
           socket.emit('serverError', { message: 'Authentication required' });
@@ -798,22 +844,13 @@ export function initializeGameSocket(io: Server): void {
           remainingTime,
         });
       } catch (err) {
-        console.error('rejoinGame error:', err);
-        socket.emit('serverError', { message: 'Failed to rejoin game.' });
+        handleSocketError(err, 'rejoinGame');
       }
     });
 
-    socket.on('makeMove', async ({ gameId, row, col }: { gameId: string; row: number; col: number }) => {
+    socket.on('makeMove', async (payload) => {
       try {
-        // Validate coordinates
-        if (
-          typeof row !== 'number' || typeof col !== 'number' ||
-          !Number.isInteger(row) || !Number.isInteger(col) ||
-          row < 0 || row > 7 || col < 0 || col > 7
-        ) {
-          socket.emit('invalidMove', { reason: 'Invalid coordinates.' });
-          return;
-        }
+        const { gameId, row, col } = makeMoveSchema.parse(payload);
 
         const authenticatedUser = typedSocket.data.user;
         const activeGame = activeGames.get(gameId);
@@ -840,12 +877,14 @@ export function initializeGameSocket(io: Server): void {
           return;
         }
 
-        const { newState, flipped, valid } = processMove(activeGame.state, row, col);
+        const moveResult = processMove(activeGame.state, row, col);
 
-        if (!valid) {
+        if (!moveResult.valid) {
           socket.emit('invalidMove', { reason: 'That move is not legal.' });
           return;
         }
+
+        const { newState, flipped } = moveResult;
 
         activeGame.state = newState;
         await persistMoves(activeGame);
@@ -872,13 +911,18 @@ export function initializeGameSocket(io: Server): void {
           }
         }
       } catch (err) {
-        console.error('makeMove error:', err);
-        socket.emit('invalidMove', { reason: 'An unexpected error occurred.' });
+        if (err instanceof z.ZodError) {
+          socket.emit('invalidMove', { reason: 'Invalid move parameters.' });
+        } else {
+          console.error('makeMove error:', err);
+          socket.emit('invalidMove', { reason: 'An unexpected error occurred.' });
+        }
       }
     });
 
-    socket.on('resign', async ({ gameId }: { gameId: string }) => {
+    socket.on('resign', async (payload) => {
       try {
+        const { gameId } = gameIdSchema.parse(payload);
         const authenticatedUser = typedSocket.data.user;
         const activeGame = activeGames.get(gameId);
 
@@ -899,8 +943,9 @@ export function initializeGameSocket(io: Server): void {
       }
     });
 
-    socket.on('requestRematch', async ({ gameId }: { gameId: string }) => {
+    socket.on('requestRematch', async (payload) => {
       try {
+        const { gameId } = gameIdSchema.parse(payload);
         const authenticatedUser = typedSocket.data.user;
         const activeGame = activeGames.get(gameId);
 
@@ -956,8 +1001,9 @@ export function initializeGameSocket(io: Server): void {
 
     // Chat support
     let lastChatTimestamp = 0;
-    socket.on('chatMessage', ({ gameId, message }: { gameId: string; message: string }) => {
+    socket.on('chatMessage', async (payload) => {
       try {
+        const { gameId, message } = chatMessageSchema.parse(payload);
         const now = Date.now();
         if (now - lastChatTimestamp < 1000) {
           socket.emit('serverError', { message: 'Chat rate limit exceeded. Please wait.' });
@@ -979,8 +1025,9 @@ export function initializeGameSocket(io: Server): void {
     });
 
     // Draw offer events
-    socket.on('offerDraw', ({ gameId }: { gameId: string }) => {
+    socket.on('offerDraw', async (payload) => {
       try {
+        const { gameId } = gameIdSchema.parse(payload);
         const activeGame = activeGames.get(gameId);
         if (!activeGame || activeGame.status !== 'active') return;
 
@@ -993,8 +1040,9 @@ export function initializeGameSocket(io: Server): void {
       }
     });
 
-    socket.on('respondDraw', async ({ gameId, accept }: { gameId: string; accept: boolean }) => {
+    socket.on('respondDraw', async (payload) => {
       try {
+        const { gameId, accept } = respondDrawSchema.parse(payload);
         const activeGame = activeGames.get(gameId);
         if (!activeGame || activeGame.status !== 'active') return;
 
@@ -1012,8 +1060,9 @@ export function initializeGameSocket(io: Server): void {
     });
 
     // Spectator support
-    socket.on('spectateGame', ({ gameId }: { gameId: string }) => {
+    socket.on('spectateGame', async (payload) => {
       try {
+        const { gameId } = gameIdSchema.parse(payload);
         const activeGame = activeGames.get(gameId);
         if (!activeGame) {
           socket.emit('serverError', { message: 'Game not found.' });

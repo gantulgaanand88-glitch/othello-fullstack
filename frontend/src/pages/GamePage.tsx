@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import GameBoard from '../components/GameBoard';
+import SvgBoard from '../components/SvgBoard';
 import GameOverModal from '../components/GameOverModal';
 import MatchmakingPanel from '../components/MatchmakingPanel';
 import MoveHistory from '../components/MoveHistory';
 import PlayerPanel from '../components/PlayerPanel';
-import MoveTimer from '../components/MoveTimer';
 import GameChat from '../components/GameChat';
 import ReportModal from '../components/ReportModal';
 import { useSocket } from '../hooks/useSocket';
@@ -22,6 +21,7 @@ import {
   RatingUpdateEvent,
   getPlayerRankLabel,
 } from '../types';
+import { applyMove } from '../lib/gameEngine';
 
 export function GamePage() {
   const navigate = useNavigate();
@@ -281,6 +281,16 @@ export function GamePage() {
   const handleMove = (row: number, col: number) => {
     if (!gameId || !gameState || gameState.gameStatus !== 'playing' || gameState.currentPlayer !== yourColor) {
       return;
+    }
+
+    const isLegal = gameState.legalMoves.some(([r, c]) => r === row && c === col);
+    if (isLegal) {
+      const result = applyMove(gameState, row, col);
+      if (result.valid) {
+        setGameState(result.newState);
+        setLastMove({ row, col });
+        setFlipped(result.flipped);
+      }
     }
 
     emit('makeMove', { gameId, row, col });
@@ -691,35 +701,21 @@ export function GamePage() {
       {gameState && yourColor && opponent ? (
         <section className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)_320px] text-left">
           {/* Left Column: Player Panels & Timers */}
-          <div className="space-y-6">
+          <div className="space-y-6 flex flex-col justify-between">
             <div className="space-y-3">
               <PlayerPanel
-                user={user}
-                color={yourColor}
-                score={yourScore}
-                isActiveTurn={gameState.currentPlayer === yourColor && gameState.gameStatus === 'playing'}
-                ratingChange={ratingChange}
-              />
-              <MoveTimer
-                totalMs={5 * 60_000}
-                remainingMs={gameState.currentPlayer === yourColor ? remainingTime : 5 * 60_000}
-                isActive={gameState.currentPlayer === yourColor && gameState.gameStatus === 'playing'}
-              />
-            </div>
-            <div className="space-y-3">
-              <PlayerPanel
-                user={opponent}
-                color={yourColor === 'black' ? 'white' : 'black'}
+                username={opponent.username}
+                rating={opponent.rating}
+                rank={opponent.rank || getPlayerRankLabel(opponent.rating)}
                 score={opponentScore}
-                isActiveTurn={gameState.currentPlayer !== yourColor && gameState.gameStatus === 'playing'}
+                color={yourColor === 'black' ? 'white' : 'black'}
+                isActive={gameState.currentPlayer !== yourColor && gameState.gameStatus === 'playing'}
+                isTop={true}
+                timeMs={gameState.currentPlayer !== yourColor ? remainingTime : 5 * 60_000}
+                isGuest={opponent.id.startsWith('guest_') || opponent.id.startsWith('bot_')}
               />
-              <div className="flex justify-between items-center gap-3">
-                <MoveTimer
-                  totalMs={5 * 60_000}
-                  remainingMs={gameState.currentPlayer !== yourColor ? remainingTime : 5 * 60_000}
-                  isActive={gameState.currentPlayer !== yourColor && gameState.gameStatus === 'playing'}
-                />
-                {!user.isGuest && !isBotGame && (
+              {!user.isGuest && !isBotGame && (
+                <div className="flex justify-end">
                   <button
                     type="button"
                     onClick={() => setReportModalOpen(true)}
@@ -727,20 +723,38 @@ export function GamePage() {
                   >
                     🚩 Report
                   </button>
-                )}
-              </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <PlayerPanel
+                username={user.username}
+                rating={user.rating}
+                rank={user.rank}
+                score={yourScore}
+                color={yourColor}
+                isActive={gameState.currentPlayer === yourColor && gameState.gameStatus === 'playing'}
+                isTop={false}
+                timeMs={gameState.currentPlayer === yourColor ? remainingTime : 5 * 60_000}
+                isGuest={user.isGuest}
+              />
             </div>
           </div>
 
           {/* Center Column: GameBoard & In-Game Controls */}
           <div className="space-y-4">
-            <GameBoard
-              state={gameState}
-              yourColor={yourColor}
-              lastMove={lastMove}
-              flipped={flipped}
-              onSquareClick={handleMove}
-            />
+            <div className="w-full max-w-[600px] aspect-square mx-auto xl:mx-0">
+              <SvgBoard
+                board={gameState.board}
+                legalMoves={gameState.legalMoves}
+                lastMove={lastMove}
+                flippedPieces={flipped}
+                currentPlayer={gameState.currentPlayer}
+                yourColor={yourColor}
+                onSquareClick={handleMove}
+              />
+            </div>
 
             <div className="flex flex-wrap gap-3">
               {resignConfirmOpen ? (

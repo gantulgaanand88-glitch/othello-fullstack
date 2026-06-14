@@ -33,8 +33,22 @@ app.use(pinoHttp());
 // Response compression
 app.use(compression());
 
-// Security headers
-app.use(helmet());
+// Security headers with strict CSP
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'", ...allowedOrigins],
+      fontSrc: ["'self'", "data:"],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: [],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
 
 app.use(
   cors({
@@ -85,6 +99,17 @@ app.use('/api/consent', consentRoutes);
 app.use('/api/report', reportRoutes);
 app.use('/api/history', historyRoutes);
 app.use('/api/profile', profileRoutes);
+
+// Centralized error handling middleware
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled server error:', err);
+  const statusCode = err.status || 500;
+  const message = process.env.NODE_ENV === 'production' 
+    ? 'An unexpected error occurred.' 
+    : err.message || 'An unexpected error occurred.';
+    
+  res.status(statusCode).json({ message });
+});
 
 const io = new Server(server, {
   cors: {

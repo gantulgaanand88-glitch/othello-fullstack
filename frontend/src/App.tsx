@@ -21,9 +21,9 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 function LoadingFallback() {
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
-      <div className="relative h-12 w-12">
-        <div className="absolute inset-0 rounded-full border-4 border-gray-800" />
-        <div className="absolute inset-0 rounded-full border-4 border-green-500 border-t-transparent animate-spin" />
+      <div className="relative w-9 h-9">
+        <div className="absolute inset-0 rounded-full border border-border" />
+        <div className="absolute inset-0 rounded-full border border-transparent border-t-gold animate-spin-slow" />
       </div>
     </div>
   );
@@ -41,10 +41,10 @@ function App() {
   } = useAuth();
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col">
+    <div className="min-h-dvh bg-base text-ink flex flex-col">
       <Navbar />
 
-      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8 flex-grow">
+      <main className="flex-grow">
         <Suspense fallback={<LoadingFallback />}>
           <Routes>
             <Route path="/" element={<LandingPage />} />

@@ -3,142 +3,121 @@ import { Link, NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `text-sm transition ${isActive ? 'text-green-400 font-medium' : 'text-gray-300 hover:text-white'}`;
+  `nav-link${isActive ? ' active' : ''}`;
 
 export function Navbar() {
   const { user, openAuthModal, logout } = useAuth();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Close the mobile dropdown menu whenever the pathname changes
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [location.pathname]);
+  useEffect(() => { setMobileOpen(false); }, [location.pathname]);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-gray-800 bg-gray-900/90 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-        <Link to="/" className="flex items-center gap-3">
-          <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-green-500 to-green-700 text-lg font-bold text-white shadow-lg shadow-green-500/20">
-            O
+    <header className="sticky top-0 z-40 bg-base/95 backdrop-blur border-b border-border">
+      <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 h-13">
+
+        {/* Logo */}
+        <Link to="/" className="flex items-center gap-2.5 group">
+          {/* Board icon */}
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none" className="flex-shrink-0">
+            <rect x="1" y="1" width="20" height="20" rx="2" fill="#0d1a0d" stroke="#1e2e1e" strokeWidth="1"/>
+            <rect x="1" y="1" width="9.5" height="9.5" rx="0" fill="#0f1f0f"/>
+            <rect x="11.5" y="11.5" width="9.5" height="9.5" rx="0" fill="#0f1f0f"/>
+            <circle cx="6" cy="6" r="2.5" fill="#f0ece4"/>
+            <circle cx="16" cy="6" r="2.5" fill="#0e0e0e" stroke="#2a2926" strokeWidth="0.5"/>
+            <circle cx="6" cy="16" r="2.5" fill="#0e0e0e" stroke="#2a2926" strokeWidth="0.5"/>
+            <circle cx="16" cy="16" r="2.5" fill="#f0ece4"/>
+          </svg>
+          <span className="font-serif text-base text-ink leading-none tracking-tight group-hover:text-gold transition-colors">
+            Othello<span className="text-gold">.</span>
           </span>
-          <div className="text-left">
-            <p className="text-lg font-semibold text-white leading-tight">Othello Arena</p>
-            <p className="text-[10px] uppercase tracking-[0.25em] text-gray-500">Ranked Multiplayer</p>
-          </div>
         </Link>
 
-        {/* Desktop Nav */}
-        <nav className="hidden items-center gap-6 md:flex">
-          <NavLink to="/" end className={navLinkClass}>
-            Home
-          </NavLink>
-          <NavLink to="/game" className={navLinkClass}>
-            Play
-          </NavLink>
-          <NavLink to="/leaderboard" className={navLinkClass}>
-            Leaderboard
-          </NavLink>
-          <NavLink to="/spectate" className={navLinkClass}>
-            Spectate
-          </NavLink>
-          {user && !user.isGuest && (
-            <>
-              <NavLink to="/history" className={navLinkClass}>
-                History
-              </NavLink>
-              <NavLink to={`/profile/${user.username}`} className={navLinkClass}>
-                Profile
-              </NavLink>
-            </>
-          )}
+        {/* Desktop nav */}
+        <nav className="hidden md:flex items-center gap-7">
+          {[
+            { to: '/',           label: 'Home',       end: true },
+            { to: '/game',       label: 'Play' },
+            { to: '/leaderboard',label: 'Ranks' },
+            { to: '/spectate',   label: 'Watch' },
+            ...(user && !user.isGuest
+              ? [{ to: '/history', label: 'History' }, { to: `/profile/${user.username}`, label: 'Profile' }]
+              : []),
+          ].map(({ to, label, end }) => (
+            <NavLink key={to} to={to} end={end} className={navLinkClass}>{label}</NavLink>
+          ))}
         </nav>
 
+        {/* Auth controls */}
         <div className="flex items-center gap-3">
           {user ? (
             <>
               <Link
                 to={user.isGuest ? '#' : `/profile/${user.username}`}
-                className="hidden rounded-full border border-gray-700 bg-gray-800 px-4 py-2 text-sm text-gray-300 sm:block transition hover:border-gray-650 hover:bg-gray-750"
+                className="hidden sm:flex items-center gap-2 text-xs font-mono"
               >
-                <span className="font-medium text-white">{user.username}</span>
-                {user.isGuest ? (
-                  <span className="ml-1 text-gray-500">(Guest)</span>
-                ) : (
-                  <span className="ml-1 text-green-400">• {user.rating}</span>
-                )}
+                <span className="text-ink">{user.username}</span>
+                {user.isGuest
+                  ? <span className="text-ink-faint">guest</span>
+                  : <span className="text-gold nums">{user.rating}</span>}
               </Link>
-              <button
-                type="button"
-                onClick={logout}
-                className="rounded-full border border-gray-600 px-4 py-2 text-sm font-medium text-gray-200 transition hover:border-red-400/50 hover:bg-red-500/10 hover:text-red-300"
-              >
-                {user.isGuest ? 'Leave' : 'Logout'}
+              <button type="button" onClick={logout} className="btn-ghost text-ink-faint">
+                {user.isGuest ? 'Leave' : 'Sign out'}
               </button>
             </>
           ) : (
             <button
               type="button"
               onClick={() => openAuthModal('login')}
-              className="rounded-full bg-green-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-green-500 hover:shadow-lg hover:shadow-green-500/20"
+              className="btn-gold"
+              style={{ padding: '0.45rem 1.1rem', fontSize: '0.68rem' }}
             >
-              Login / Register
+              Sign In
             </button>
           )}
 
-          {/* Mobile hamburger toggle */}
+          {/* Mobile toggle */}
           <button
             type="button"
-            onClick={() => setMobileOpen(!mobileOpen)}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-700 text-gray-300 transition hover:bg-gray-800 hover:text-white md:hidden focus:outline-none focus:ring-2 focus:ring-green-550"
             aria-label="Toggle menu"
+            onClick={() => setMobileOpen(v => !v)}
+            className="md:hidden flex flex-col gap-1.5 justify-center w-8 h-8 p-1 focus-gold"
+            style={{ background: 'none', border: 'none', cursor: 'pointer' }}
           >
-            {mobileOpen ? (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-              </svg>
-            )}
+            {[0, 1, 2].map(i => (
+              <span
+                key={i}
+                className="block h-px bg-ink-muted transition-all duration-200"
+                style={{
+                  opacity: mobileOpen && i === 1 ? 0 : 1,
+                  transform:
+                    mobileOpen && i === 0 ? 'rotate(45deg) translateY(7px)' :
+                    mobileOpen && i === 2 ? 'rotate(-45deg) translateY(-7px)' : 'none',
+                }}
+              />
+            ))}
           </button>
         </div>
       </div>
 
-      {/* Mobile nav dropdown */}
+      {/* Mobile dropdown */}
       {mobileOpen && (
-        <div className="border-t border-gray-800 bg-gray-900/95 px-4 py-4 backdrop-blur animate-slide-down md:hidden">
-          <nav className="flex flex-col gap-3">
-            <NavLink to="/" end className={navLinkClass}>
-              Home
-            </NavLink>
-            <NavLink to="/game" className={navLinkClass}>
-              Play
-            </NavLink>
-            <NavLink to="/leaderboard" className={navLinkClass}>
-              Leaderboard
-            </NavLink>
-            <NavLink to="/spectate" className={navLinkClass}>
-              Spectate
-            </NavLink>
-            {user && !user.isGuest && (
-              <>
-                <NavLink to="/history" className={navLinkClass}>
-                  History
-                </NavLink>
-                <NavLink to={`/profile/${user.username}`} className={navLinkClass}>
-                  Profile
-                </NavLink>
-              </>
-            )}
-            <div className="h-px bg-gray-800 my-2" />
-            <Link to="/privacy" className="text-xs text-gray-500 hover:text-gray-400">
-              Privacy Policy
-            </Link>
-            <Link to="/terms" className="text-xs text-gray-500 hover:text-gray-400">
-              Terms of Service
-            </Link>
+        <div className="md:hidden border-t border-border bg-surface px-5 py-5 animate-slide-down">
+          <nav className="flex flex-col gap-5">
+            {[
+              { to: '/',            label: 'Home',    end: true },
+              { to: '/game',        label: 'Play' },
+              { to: '/leaderboard', label: 'Ranks' },
+              { to: '/spectate',    label: 'Watch' },
+              ...(user && !user.isGuest
+                ? [{ to: '/history', label: 'History' }, { to: `/profile/${user.username}`, label: 'Profile' }]
+                : []),
+            ].map(({ to, label, end }) => (
+              <NavLink key={to} to={to} end={end} className={navLinkClass}>{label}</NavLink>
+            ))}
+            <div className="h-px bg-border" />
+            <Link to="/privacy" className="font-mono text-2xs text-ink-faint uppercase tracking-wider">Privacy</Link>
+            <Link to="/terms"   className="font-mono text-2xs text-ink-faint uppercase tracking-wider">Terms</Link>
           </nav>
         </div>
       )}
