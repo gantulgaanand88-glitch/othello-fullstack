@@ -1,0 +1,33 @@
+# Dependencies & build output
+node_modules/
+dist/
+.env
+*.log
+*.pid
+*.tsbuildinfo
+
+# Unrelated projects & files in parent directory
+ass3/
+otello/
+shooppinh/
+*.pdf
+*.lnk
+*.txt
+*.md
+!backend/
+!frontend/
+!render.yaml
+!.gitignore
+
+# QA / test artifacts
+frontend/output/
+frontend/qa/
+frontend/qa-static-server.cjs
+backend/qa-backend.pid
+backend/src/qa/
+
+# Generated config duplicates
+frontend/vite.config.js
+frontend/vite.config.d.ts
+frontend/tailwind.config.js
+frontend/tailwind.config.d.ts
