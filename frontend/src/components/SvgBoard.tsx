@@ -128,14 +128,17 @@ export const SvgBoard = React.memo(function SvgBoard({
 
               {/* Legal move indicator */}
               {isLegal && isYourTurn && (
-                <circle
-                  cx={x + CELL / 2}
-                  cy={y + CELL / 2}
-                  r={CELL * 0.13}
-                  fill="#c9a84c"
-                  opacity="0.45"
-                  className="animate-legal-pulse"
-                />
+                <g transform={`translate(${x + CELL / 2}, ${y + CELL / 2})`}>
+                  <circle
+                    cx="0"
+                    cy="0"
+                    r={CELL * 0.13}
+                    fill="#c9a84c"
+                    opacity="0.45"
+                    className="animate-legal-pulse"
+                    style={{ transformOrigin: '0px 0px' }}
+                  />
+                </g>
               )}
 
               {/* Clickable overlay (entire cell) */}

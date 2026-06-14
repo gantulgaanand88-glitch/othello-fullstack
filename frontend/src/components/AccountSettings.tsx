@@ -169,7 +169,7 @@ export function AccountSettings() {
       </div>
 
       {/* Danger Zone Section */}
-      <div className="rounded-2xl border border-red-500/25 bg-red-950/10 p-5 space-y-4">
+      <div className="rounded-2xl border border-red-500/25 bg-red-900/10 p-5 space-y-4">
         <h3 className="text-sm font-semibold text-red-400">Danger Zone</h3>
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -189,7 +189,7 @@ export function AccountSettings() {
           </button>
         </div>
 
-        <div className="h-px bg-red-950/40" />
+        <div className="h-px bg-red-900/40" />
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>

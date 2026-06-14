@@ -429,7 +429,7 @@ export function GamePage() {
                 className={`border-b-2 px-6 py-3.5 text-sm font-semibold tracking-wide transition active:scale-95 ${
                   activeTab === 'ranked'
                     ? 'border-green-500 text-green-400'
-                    : 'border-transparent text-gray-400 hover:text-gray-250'
+                    : 'border-transparent text-gray-400 hover:text-gray-300'
                 }`}
               >
                 🏆 Ranked Play
@@ -440,7 +440,7 @@ export function GamePage() {
                 className={`border-b-2 px-6 py-3.5 text-sm font-semibold tracking-wide transition active:scale-95 ${
                   activeTab === 'bot'
                     ? 'border-green-500 text-green-400'
-                    : 'border-transparent text-gray-400 hover:text-gray-250'
+                    : 'border-transparent text-gray-400 hover:text-gray-300'
                 }`}
               >
                 🤖 Play vs Computer
@@ -451,7 +451,7 @@ export function GamePage() {
                 className={`border-b-2 px-6 py-3.5 text-sm font-semibold tracking-wide transition active:scale-95 ${
                   activeTab === 'friend'
                     ? 'border-green-500 text-green-400'
-                    : 'border-transparent text-gray-400 hover:text-gray-250'
+                    : 'border-transparent text-gray-400 hover:text-gray-300'
                 }`}
               >
                 👥 Play vs Friend
@@ -559,7 +559,7 @@ export function GamePage() {
                         className={`flex-1 rounded-full border px-5 py-3 text-sm font-semibold transition active:scale-95 ${
                           selectedColor === col.value
                             ? 'border-green-500 bg-green-500/10 text-green-400'
-                            : 'border-gray-700 bg-gray-900/50 text-gray-305 hover:border-gray-600'
+                            : 'border-gray-700 bg-gray-900/50 text-gray-300 hover:border-gray-600'
                         }`}
                       >
                         {col.label}
@@ -790,7 +790,7 @@ export function GamePage() {
                 type="button"
                 onClick={handleOfferDraw}
                 disabled={gameState.gameStatus !== 'playing' || drawOfferSent}
-                className="rounded-full border border-yellow-500/30 px-5 py-2.5 text-sm font-medium text-yellow-250 transition hover:bg-yellow-500/10 disabled:opacity-50 active:scale-95"
+                className="rounded-full border border-yellow-500/30 px-5 py-2.5 text-sm font-medium text-yellow-300 transition hover:bg-yellow-500/10 disabled:opacity-50 active:scale-95"
               >
                 {drawOfferSent ? 'Draw Offered' : 'Offer Draw'}
               </button>
