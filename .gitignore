@@ -1,6 +1,7 @@
 # Dependencies & build output
 node_modules/
 dist/
+coverage/
 .env
 *.log
 *.pid
@@ -14,6 +15,9 @@ shooppinh/
 *.lnk
 *.txt
 *.md
+!README.md
+!docs/
+!docs/**
 !backend/
 !frontend/
 !render.yaml
@@ -21,6 +25,8 @@ shooppinh/
 
 # QA / test artifacts
 frontend/output/
+frontend/playwright-report/
+frontend/test-results/
 frontend/qa/
 frontend/qa-static-server.cjs
 backend/qa-backend.pid

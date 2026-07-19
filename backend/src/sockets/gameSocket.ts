@@ -143,6 +143,28 @@ function removeUserFromQueue(userId: string): void {
   }
 }
 
+function userHasActiveGame(userId: string): boolean {
+  for (const game of activeGames.values()) {
+    if (
+      game.status === 'active' &&
+      ((!game.blackPlayer.isBot && game.blackPlayer.userId === userId) ||
+        (!game.whitePlayer.isBot && game.whitePlayer.userId === userId))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function removeUserRooms(userId: string, io: Server): void {
+  for (const [code, room] of customRooms) {
+    if (room.host.userId === userId) {
+      customRooms.delete(code);
+      io.sockets.sockets.get(room.host.socketId)?.emit('roomCancelled');
+    }
+  }
+}
+
 function getGamePlayer(activeGame: ActiveGame, userId: string): GamePlayer | null {
   if (activeGame.blackPlayer.userId === userId) {
     return activeGame.blackPlayer;
@@ -279,6 +301,9 @@ async function createActiveGame(
   whiteEntry: QueueEntry & { isBot?: boolean; botDifficulty?: '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' },
   isCustomRoom = false,
 ): Promise<void> {
+  if (blackEntry.userId === whiteEntry.userId && !blackEntry.isBot && !whiteEntry.isBot) {
+    throw new Error('A user cannot play against the same account.');
+  }
   const hasGuest = !!(blackEntry.isGuest || whiteEntry.isGuest || blackEntry.isBot || whiteEntry.isBot);
   let dbGameId = '';
 
@@ -543,7 +568,7 @@ export function initializeGameSocket(io: Server): void {
   });
 
   // Periodic cleanup of stale finished games and abandoned rooms
-  setInterval(() => {
+  const cleanupTimer = setInterval(() => {
     const now = Date.now();
 
     // Remove finished/abandoned games older than 30 minutes
@@ -563,6 +588,12 @@ export function initializeGameSocket(io: Server): void {
       }
     }
   }, CLEANUP_INTERVAL_MS);
+  cleanupTimer.unref();
+
+  const matchmakingTimer = setInterval(() => {
+    void tryMatchmake(io).catch((error) => console.error('matchmaking interval error:', error));
+  }, 1_000);
+  matchmakingTimer.unref();
 
   io.on('connection', (socket: Socket) => {
     const typedSocket = socket as SocketWithUser;
@@ -605,11 +636,12 @@ export function initializeGameSocket(io: Server): void {
           return;
         }
 
-        if (socketToGame.has(socket.id)) {
+        if (socketToGame.has(socket.id) || userHasActiveGame(authenticatedUser.userId)) {
           socket.emit('serverError', { message: 'You are already in an active game.' });
           return;
         }
 
+        removeUserRooms(authenticatedUser.userId, io);
         // Prevent same user from joining queue across multiple tabs
         removeUserFromQueue(authenticatedUser.userId);
         removeFromQueue(socket.id);
@@ -643,10 +675,13 @@ export function initializeGameSocket(io: Server): void {
           return;
         }
 
-        if (socketToGame.has(socket.id)) {
+        if (socketToGame.has(socket.id) || userHasActiveGame(authenticatedUser.userId)) {
           socket.emit('serverError', { message: 'You are already in an active game.' });
           return;
         }
+
+        removeUserFromQueue(authenticatedUser.userId);
+        removeUserRooms(authenticatedUser.userId, io);
 
         let humanColor: Player = 'black';
         if (playerColor === 'random') {
@@ -705,10 +740,12 @@ export function initializeGameSocket(io: Server): void {
           return;
         }
 
-        if (socketToGame.has(socket.id)) {
+        if (socketToGame.has(socket.id) || userHasActiveGame(authenticatedUser.userId)) {
           socket.emit('serverError', { message: 'You are already in an active game.' });
           return;
         }
+
+        removeUserFromQueue(authenticatedUser.userId);
 
         // Limit custom rooms: check if user already has a custom room
         let userRoomCount = 0;
@@ -757,7 +794,7 @@ export function initializeGameSocket(io: Server): void {
           return;
         }
 
-        if (socketToGame.has(socket.id)) {
+        if (socketToGame.has(socket.id) || userHasActiveGame(authenticatedUser.userId)) {
           socket.emit('serverError', { message: 'You are already in an active game.' });
           return;
         }
@@ -770,12 +807,20 @@ export function initializeGameSocket(io: Server): void {
           return;
         }
 
-        if (room.host.socketId === socket.id) {
+        if (room.host.userId === authenticatedUser.userId) {
           socket.emit('roomError', { message: 'You cannot join your own room.' });
           return;
         }
 
+        if (userHasActiveGame(room.host.userId) || !io.sockets.sockets.get(room.host.socketId)?.connected) {
+          customRooms.delete(code);
+          socket.emit('roomError', { message: 'The host is no longer available.' });
+          return;
+        }
+
         customRooms.delete(code);
+        removeUserFromQueue(authenticatedUser.userId);
+        removeUserRooms(authenticatedUser.userId, io);
 
         const joiner: QueueEntry = {
           ...authenticatedUser,
