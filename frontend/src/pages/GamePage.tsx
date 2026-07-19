@@ -25,7 +25,7 @@ import { applyMove } from '../lib/gameEngine';
 
 export function GamePage() {
   const navigate = useNavigate();
-  const { user, token, openAuthModal, updateUser } = useAuth();
+  const { user, token, openAuthModal, updateUser, loginAsGuest } = useAuth();
   const { isConnected, connect, disconnect, emit, on, setGameId: setSocketGameId } = useSocket();
 
   const [queueJoinedAt, setQueueJoinedAt] = useState<number | null>(null);
@@ -255,7 +255,7 @@ export function GamePage() {
             type="button"
             onClick={async () => {
               try {
-                await useAuth().loginAsGuest();
+                await loginAsGuest();
               } catch {
                 openAuthModal('login');
               }
@@ -547,15 +547,15 @@ export function GamePage() {
                 <div className="space-y-3">
                   <span className="text-sm font-semibold text-gray-300 block">Choose Your Color</span>
                   <div className="flex flex-col gap-2 sm:flex-row">
-                    {[
+                    {([
                       { value: 'black', label: '⚫ Black (Plays First)' },
                       { value: 'white', label: '⚪ White (Plays Second)' },
                       { value: 'random', label: '🎲 Random' }
-                    ].map((col) => (
+                    ] as const).map((col) => (
                       <button
                         key={col.value}
                         type="button"
-                        onClick={() => setSelectedColor(col.value as any)}
+                        onClick={() => setSelectedColor(col.value)}
                         className={`flex-1 rounded-full border px-5 py-3 text-sm font-semibold transition active:scale-95 ${
                           selectedColor === col.value
                             ? 'border-green-500 bg-green-500/10 text-green-400'

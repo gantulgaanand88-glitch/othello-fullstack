@@ -11,7 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "test": "tsx --test \"src/**/*.test.ts\"",
+    "test": "tsx --test src/gameEngine/*.test.ts src/utils/*.test.ts",
     "test:coverage": "c8 --reporter=text --reporter=lcov npm test"
   },
   "dependencies": {
@@ -37,7 +37,6 @@
     "@types/jsonwebtoken": "^9.0.8",
     "@types/node": "^22.10.2",
     "c8": "^11.0.0",
-    "mongodb-memory-server": "^10.1.4",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

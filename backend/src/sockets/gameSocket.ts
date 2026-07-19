@@ -1113,6 +1113,10 @@ export function initializeGameSocket(io: Server): void {
           socket.emit('serverError', { message: 'Game not found.' });
           return;
         }
+        if (activeGame.isCustomRoom) {
+          socket.emit('serverError', { message: 'Private room games cannot be spectated.' });
+          return;
+        }
         socket.join(gameId);
         socket.emit('spectateSuccess', {
           gameId,
@@ -1134,7 +1138,7 @@ export function initializeGameSocket(io: Server): void {
     socket.on('listActiveGames', () => {
       try {
         const games = Array.from(activeGames.values())
-          .filter((g) => g.status === 'active')
+          .filter((g) => g.status === 'active' && !g.isCustomRoom)
           .map((g) => ({
             gameId: g.gameId,
             blackPlayer: {

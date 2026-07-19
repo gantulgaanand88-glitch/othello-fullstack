@@ -5,7 +5,6 @@ import express from 'express';
 import helmet from 'helmet';
 import http from 'http';
 import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
 import { rateLimit } from 'express-rate-limit';
 import { Server } from 'socket.io';
 import compression from 'compression';
@@ -129,26 +128,8 @@ async function startServer(): Promise<void> {
     throw new Error('MONGODB_URI is not configured.');
   }
 
-  let connectionUri = mongoUri;
-  if (process.env.NODE_ENV !== 'production') {
-    try {
-      // Try to connect to configured MongoDB first with a short timeout
-      await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 2000 });
-      console.log('Connected to configured MongoDB database.');
-    } catch (err) {
-      console.log('Configured MongoDB not reachable. Starting MongoMemoryServer fallback (v4.4.29)...');
-      const mongoServer = await MongoMemoryServer.create({
-        binary: {
-          version: '4.4.29',
-        }
-      });
-      connectionUri = mongoServer.getUri();
-      await mongoose.connect(connectionUri);
-      console.log(`Connected to MongoMemoryServer at ${connectionUri}`);
-    }
-  } else {
-    await mongoose.connect(mongoUri);
-  }
+  await mongoose.connect(mongoUri);
+  console.log('Connected to MongoDB database.');
 
   server.listen(port, '0.0.0.0', () => {
     console.log(`Backend listening on port ${port}`);
