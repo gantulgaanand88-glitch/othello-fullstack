@@ -92,7 +92,6 @@ function removeFromQueue(socketId: string): void {
   }
 }
 
-/** Also remove by userId (prevents multi-tab queue exploits). */
 function removeUserFromQueue(userId: string): void {
   for (let i = matchmakingQueue.length - 1; i >= 0; i--) {
     if (matchmakingQueue[i].userId === userId) {
