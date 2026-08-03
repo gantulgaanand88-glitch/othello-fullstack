@@ -40,6 +40,7 @@ interface ActiveGame {
   status: 'active' | 'finished' | 'abandoned';
   isCustomRoom: boolean;
   moveTimer: ReturnType<typeof setTimeout> | null;
+  reconnectTimers: Map<string, ReturnType<typeof setTimeout>>;
   lastMoveAt: number;
 }
 
@@ -62,6 +63,7 @@ const STALE_GAME_CLEANUP_MS = 30 * 60_000; // 30 minutes
 const STALE_ROOM_CLEANUP_MS = 15 * 60_000; // 15 minutes
 const CLEANUP_INTERVAL_MS = 60_000; // Run cleanup every minute
 const MOVE_TIMEOUT_MS = 5 * 60_000; // 5 minutes per move
+const RECONNECT_GRACE_MS = 30_000; // Mobile networks can briefly change transports/IPs
 
 export const matchmakingQueue: QueueEntry[] = [];
 export const activeGames = new Map<string, ActiveGame>();
@@ -208,6 +210,66 @@ function clearMoveTimer(activeGame: ActiveGame): void {
   }
 }
 
+function clearReconnectTimer(activeGame: ActiveGame, userId: string): void {
+  const timer = activeGame.reconnectTimers.get(userId);
+  if (timer) {
+    clearTimeout(timer);
+    activeGame.reconnectTimers.delete(userId);
+  }
+}
+
+function clearReconnectTimers(activeGame: ActiveGame): void {
+  for (const timer of activeGame.reconnectTimers.values()) {
+    clearTimeout(timer);
+  }
+  activeGame.reconnectTimers.clear();
+}
+
+function resumeActiveGame(
+  io: Server,
+  socket: SocketWithUser,
+  user: AuthenticatedSocketData,
+): void {
+  const activeGame = Array.from(activeGames.values()).find(
+    (game) =>
+      game.status === 'active' &&
+      (game.blackPlayer.userId === user.userId || game.whitePlayer.userId === user.userId),
+  );
+
+  if (!activeGame) {
+    return;
+  }
+
+  const player = getGamePlayer(activeGame, user.userId);
+  if (!player || player.socketId === socket.id) {
+    return;
+  }
+
+  socketToGame.delete(player.socketId);
+  player.socketId = socket.id;
+  socketToGame.set(socket.id, activeGame.gameId);
+  socket.join(activeGame.gameId);
+  clearReconnectTimer(activeGame, user.userId);
+
+  const opponent =
+    player.userId === activeGame.blackPlayer.userId
+      ? activeGame.whitePlayer
+      : activeGame.blackPlayer;
+
+  socket.emit('gameResumed', {
+    gameId: activeGame.gameId,
+    yourColor: player.color,
+    opponent: {
+      id: opponent.userId,
+      username: opponent.username,
+      rating: opponent.rating,
+    },
+    state: activeGame.state,
+  });
+
+  io.sockets.sockets.get(opponent.socketId)?.emit('opponentReconnected');
+}
+
 async function createActiveGame(io: Server, first: QueueEntry, second: QueueEntry, isCustomRoom = false): Promise<void> {
   const blackEntry = first.joinedAt <= second.joinedAt ? first : second;
   const whiteEntry = blackEntry.socketId === first.socketId ? second : first;
@@ -249,6 +311,7 @@ async function createActiveGame(io: Server, first: QueueEntry, second: QueueEntr
     status: 'active',
     isCustomRoom,
     moveTimer: null,
+    reconnectTimers: new Map(),
     lastMoveAt: Date.now(),
   };
 
@@ -328,6 +391,7 @@ async function finishGame(
   }
 
   clearMoveTimer(activeGame);
+  clearReconnectTimers(activeGame);
 
   activeGame.status = status;
   activeGame.state = {
@@ -473,7 +537,10 @@ export function initializeGameSocket(io: Server): void {
 
     socket.on('authenticate', async ({ token }: { token: string }) => {
       try {
-        await authenticateSocket(typedSocket, token);
+        const authenticatedUser = await authenticateSocket(typedSocket, token);
+        if (authenticatedUser) {
+          resumeActiveGame(io, typedSocket, authenticatedUser);
+        }
       } catch (err) {
         console.error('authenticate error:', err);
         socket.emit('error', { message: 'Authentication failed.' });
@@ -761,9 +828,27 @@ export function initializeGameSocket(io: Server): void {
 
         const disconnectedPlayer =
           activeGame.blackPlayer.socketId === socket.id ? activeGame.blackPlayer : activeGame.whitePlayer;
-        const winner: Player = disconnectedPlayer.color === 'black' ? 'white' : 'black';
+        const opponent =
+          disconnectedPlayer.userId === activeGame.blackPlayer.userId
+            ? activeGame.whitePlayer
+            : activeGame.blackPlayer;
+        const reconnectDeadline = Date.now() + RECONNECT_GRACE_MS;
 
-        await finishGame(io, activeGame, winner, 'disconnect-forfeit', 'abandoned');
+        clearReconnectTimer(activeGame, disconnectedPlayer.userId);
+        io.sockets.sockets.get(opponent.socketId)?.emit('opponentDisconnected', { reconnectDeadline });
+
+        const disconnectedSocketId = socket.id;
+        const reconnectTimer = setTimeout(async () => {
+          activeGame.reconnectTimers.delete(disconnectedPlayer.userId);
+          if (activeGame.status !== 'active' || disconnectedPlayer.socketId !== disconnectedSocketId) {
+            return;
+          }
+
+          const winner: Player = disconnectedPlayer.color === 'black' ? 'white' : 'black';
+          await finishGame(io, activeGame, winner, 'disconnect-forfeit', 'abandoned');
+        }, RECONNECT_GRACE_MS);
+
+        activeGame.reconnectTimers.set(disconnectedPlayer.userId, reconnectTimer);
       } catch (err) {
         console.error('disconnect cleanup error:', err);
       }
