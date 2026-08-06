@@ -34,7 +34,7 @@ The application is split into three clients/services:
 - **Language:** Kotlin
 - **UI:** Jetpack Compose with a Canvas-rendered 8×8 board
 - **Architecture:** Repository + ViewModel + immutable StateFlow UI state
-- **Networking:** Native OkHttp REST calls and the Socket.IO Java client over WebSocket
+- **Networking:** Native OkHttp REST calls and the Socket.IO Java client with polling/WebSocket upgrade
 - **Persistence:** AndroidX DataStore for session restoration
 - **Minimum Android version:** Android 8.0 (API 26)
 - **Target Android version:** Android 16 (API 36)
@@ -93,6 +93,14 @@ When a game finishes, the server calculates the new Elo ratings for both players
 4. The debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
 
 The debug build connects to `http://10.0.2.2:4000`, which is the host computer from an Android emulator. Start the backend locally on port 4000 before using login or multiplayer features.
+
+To test a debug build on a physical phone against a deployed server, override both endpoints:
+
+```bash
+./gradlew assembleDebug \
+  -POTHELLO_DEBUG_API_URL=https://your-api.example.com/api \
+  -POTHELLO_DEBUG_SOCKET_URL=https://your-api.example.com
+```
 
 For a production build, provide the deployed backend addresses:
 

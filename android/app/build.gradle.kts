@@ -18,12 +18,14 @@ android {
 
     buildTypes {
         debug {
-            buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:4000/api\"")
-            buildConfigField("String", "SOCKET_URL", "\"http://10.0.2.2:4000\"")
+            val apiUrl = providers.gradleProperty("OTHELLO_DEBUG_API_URL").orElse("http://10.0.2.2:4000/api").get()
+            val socketUrl = providers.gradleProperty("OTHELLO_DEBUG_SOCKET_URL").orElse("http://10.0.2.2:4000").get()
+            buildConfigField("String", "API_BASE_URL", "\"$apiUrl\"")
+            buildConfigField("String", "SOCKET_URL", "\"$socketUrl\"")
         }
         release {
-            val apiUrl = providers.gradleProperty("OTHELLO_API_URL").orElse("https://othello-api.onrender.com/api").get()
-            val socketUrl = providers.gradleProperty("OTHELLO_SOCKET_URL").orElse("https://othello-api.onrender.com").get()
+            val apiUrl = providers.gradleProperty("OTHELLO_API_URL").orElse("https://othello-api-cww8.onrender.com/api").get()
+            val socketUrl = providers.gradleProperty("OTHELLO_SOCKET_URL").orElse("https://othello-api-cww8.onrender.com").get()
             buildConfigField("String", "API_BASE_URL", "\"$apiUrl\"")
             buildConfigField("String", "SOCKET_URL", "\"$socketUrl\"")
             isMinifyEnabled = true
