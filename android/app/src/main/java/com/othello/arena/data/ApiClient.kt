@@ -24,8 +24,8 @@ class ApiClient(
   suspend fun login(email: String, password: String): AuthResponse =
     post("/auth/login", LoginRequest(email.trim(), password))
 
-  suspend fun register(username: String, email: String, password: String): AuthResponse =
-    post("/auth/register", RegisterRequest(username.trim(), email.trim(), password))
+  suspend fun register(username: String, email: String, password: String, ageConfirmed: Boolean): AuthResponse =
+    post("/auth/register", RegisterRequest(username.trim(), email.trim(), password, ageConfirmed))
 
   suspend fun guest(): AuthResponse = postEmpty("/auth/guest")
 
@@ -60,7 +60,8 @@ class ApiClient(
         if (!response.isSuccessful) {
           val message =
             try {
-              json.decodeFromString<MessageEvent>(responseBody).message
+              val error = json.decodeFromString<ApiErrorResponse>(responseBody)
+              error.errors.values.firstNotNullOfOrNull { messages -> messages.firstOrNull() } ?: error.message
             } catch (_: SerializationException) {
               "Request failed (${response.code})."
             }

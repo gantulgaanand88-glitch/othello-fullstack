@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +24,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -43,12 +46,15 @@ fun AuthScreen(
   isLoading: Boolean,
   onModeChange: (AuthMode) -> Unit,
   onLogin: (String, String) -> Unit,
-  onRegister: (String, String, String) -> Unit,
+  onRegister: (String, String, String, Boolean, Boolean) -> Unit,
   onGuest: () -> Unit,
 ) {
   var username by remember { mutableStateOf("") }
   var email by remember { mutableStateOf("") }
   var password by remember { mutableStateOf("") }
+  var ageConfirmed by remember { mutableStateOf(false) }
+  var termsAccepted by remember { mutableStateOf(false) }
+  val uriHandler = LocalUriHandler.current
 
   Column(
     modifier =
@@ -99,6 +105,7 @@ fun AuthScreen(
           singleLine = true,
           enabled = !isLoading,
           keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+          supportingText = { Text("3–20 letters, numbers, hyphens, or underscores") },
         )
         Spacer(Modifier.height(12.dp))
       }
@@ -122,12 +129,48 @@ fun AuthScreen(
         enabled = !isLoading,
         visualTransformation = PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+        supportingText = if (mode == AuthMode.REGISTER) ({ Text("At least 8 characters") }) else null,
       )
+
+      if (mode == AuthMode.REGISTER) {
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Checkbox(
+            checked = ageConfirmed,
+            onCheckedChange = { ageConfirmed = it },
+            enabled = !isLoading,
+          )
+          Text("I confirm that I am at least 13 years old.", modifier = Modifier.weight(1f), fontSize = 12.sp)
+        }
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Checkbox(
+            checked = termsAccepted,
+            onCheckedChange = { termsAccepted = it },
+            enabled = !isLoading,
+          )
+          Column(modifier = Modifier.weight(1f)) {
+            Text("I agree to the Terms of Service and Privacy Policy.", fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+              TextButton(onClick = { uriHandler.openUri("https://othello-app-7qg0.onrender.com/terms") }) {
+                Text("Terms", fontSize = 12.sp)
+              }
+              TextButton(onClick = { uriHandler.openUri("https://othello-app-7qg0.onrender.com/privacy") }) {
+                Text("Privacy", fontSize = 12.sp)
+              }
+            }
+          }
+        }
+      }
 
       Button(
         onClick = {
           if (mode == AuthMode.LOGIN) onLogin(email, password)
-          else onRegister(username, email, password)
+          else onRegister(username, email, password, ageConfirmed, termsAccepted)
         },
         modifier = Modifier.fillMaxWidth().padding(top = 20.dp).height(52.dp),
         enabled = !isLoading,

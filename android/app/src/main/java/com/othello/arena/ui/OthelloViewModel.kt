@@ -74,16 +74,30 @@ class OthelloViewModel(private val repository: OthelloRepository) : ViewModel() 
     authenticate { repository.login(email, password) }
   }
 
-  fun register(username: String, email: String, password: String) {
-    if (username.length !in 3..20) {
-      showMessage("Username must be 3–20 characters.")
+  fun register(
+    username: String,
+    email: String,
+    password: String,
+    ageConfirmed: Boolean,
+    termsAccepted: Boolean,
+  ) {
+    if (username.length !in 3..20 || !username.matches(Regex("^[a-zA-Z0-9_-]+$"))) {
+      showMessage("Username must be 3–20 characters using only letters, numbers, hyphens, or underscores.")
       return
     }
-    if (email.isBlank() || password.length < 6) {
-      showMessage("Enter a valid email and a password of at least 6 characters.")
+    if (email.isBlank() || password.length < 8) {
+      showMessage("Enter a valid email and a password of at least 8 characters.")
       return
     }
-    authenticate { repository.register(username, email, password) }
+    if (!ageConfirmed) {
+      showMessage("Confirm that you are at least 13 years old.")
+      return
+    }
+    if (!termsAccepted) {
+      showMessage("Accept the Terms of Service and Privacy Policy to create an account.")
+      return
+    }
+    authenticate { repository.register(username, email, password, ageConfirmed) }
   }
 
   fun playAsGuest() = authenticate { repository.guest() }

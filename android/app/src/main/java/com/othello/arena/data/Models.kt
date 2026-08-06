@@ -52,6 +52,13 @@ data class RegisterRequest(
   val username: String,
   val email: String,
   val password: String,
+  val ageConfirmed: Boolean,
+)
+
+@Serializable
+data class ApiErrorResponse(
+  val message: String,
+  val errors: Map<String, List<String>> = emptyMap(),
 )
 
 @Serializable

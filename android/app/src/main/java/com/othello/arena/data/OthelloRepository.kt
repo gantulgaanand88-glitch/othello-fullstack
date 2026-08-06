@@ -21,8 +21,8 @@ class OthelloRepository(
   suspend fun login(email: String, password: String): UserSession =
     persist(api.login(email, password))
 
-  suspend fun register(username: String, email: String, password: String): UserSession =
-    persist(api.register(username, email, password))
+  suspend fun register(username: String, email: String, password: String, ageConfirmed: Boolean): UserSession =
+    persist(api.register(username, email, password, ageConfirmed))
 
   suspend fun guest(): UserSession = persist(api.guest())
 

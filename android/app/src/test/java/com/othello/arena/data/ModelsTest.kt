@@ -1,6 +1,7 @@
 package com.othello.arena.data
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -39,5 +40,15 @@ class ModelsTest {
     assertEquals("Advanced", rankLabel(1400))
     assertEquals("Expert", rankLabel(1800))
     assertEquals("Master", rankLabel(2200))
+  }
+
+  @Test
+  fun registerRequest_includesRequiredAgeConfirmation() {
+    val request = RegisterRequest("player_one", "player@example.com", "password123", ageConfirmed = true)
+
+    val encoded = json.encodeToString(request)
+    val decoded = json.decodeFromString<RegisterRequest>(encoded)
+
+    assertEquals(true, decoded.ageConfirmed)
   }
 }
