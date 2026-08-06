@@ -9,9 +9,43 @@ import {
   processMove,
 } from '../gameEngine/othello';
 import { verifyAuthToken } from '../middleware/auth';
+import { computeBotMove } from '../gameEngine/bot';
 import { Game } from '../models/Game';
 import { User } from '../models/User';
-import { calculateElo } from '../utils/elo';
+import { getEloUpdateOps } from '../utils/elo';
+import { z } from 'zod';
+
+const botDifficultySchema = z.enum(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']);
+const playerColorSchema = z.enum(['black', 'white', 'random']);
+
+const startBotGameSchema = z.object({
+  difficulty: botDifficultySchema,
+  playerColor: playerColorSchema,
+});
+
+const joinRoomSchema = z.object({
+  roomCode: z.string().min(1).max(20),
+});
+
+const gameIdSchema = z.object({
+  gameId: z.string().min(1),
+});
+
+const makeMoveSchema = z.object({
+  gameId: z.string().min(1),
+  row: z.number().int().min(0).max(7),
+  col: z.number().int().min(0).max(7),
+});
+
+const chatMessageSchema = z.object({
+  gameId: z.string().min(1),
+  message: z.string().min(1).max(200),
+});
+
+const respondDrawSchema = z.object({
+  gameId: z.string().min(1),
+  accept: z.boolean(),
+});
 
 interface AuthenticatedSocketData {
   userId: string;
@@ -28,6 +62,8 @@ interface QueueEntry extends AuthenticatedSocketData {
 interface GamePlayer extends AuthenticatedSocketData {
   socketId: string;
   color: Player;
+  isBot?: boolean;
+  botDifficulty?: '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10';
 }
 
 interface ActiveGame {
@@ -40,8 +76,8 @@ interface ActiveGame {
   status: 'active' | 'finished' | 'abandoned';
   isCustomRoom: boolean;
   moveTimer: ReturnType<typeof setTimeout> | null;
-  reconnectTimers: Map<string, ReturnType<typeof setTimeout>>;
   lastMoveAt: number;
+  disconnectTimer?: ReturnType<typeof setTimeout> | null;
 }
 
 interface CustomRoom {
@@ -63,8 +99,6 @@ const STALE_GAME_CLEANUP_MS = 30 * 60_000; // 30 minutes
 const STALE_ROOM_CLEANUP_MS = 15 * 60_000; // 15 minutes
 const CLEANUP_INTERVAL_MS = 60_000; // Run cleanup every minute
 const MOVE_TIMEOUT_MS = 5 * 60_000; // 5 minutes per move
-const RECONNECT_GRACE_MS = 30_000; // Mobile networks can briefly change transports/IPs
-
 export const matchmakingQueue: QueueEntry[] = [];
 export const activeGames = new Map<string, ActiveGame>();
 export const socketToGame = new Map<string, string>();
@@ -73,9 +107,15 @@ export const customRooms = new Map<string, CustomRoom>();
 function generateRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
-  const bytes = crypto.randomBytes(6);
-  for (let i = 0; i < 6; i++) {
-    code += chars[bytes[i] % chars.length];
+  while (true) {
+    code = '';
+    const bytes = crypto.randomBytes(6);
+    for (let i = 0; i < 6; i++) {
+      code += chars[bytes[i] % chars.length];
+    }
+    if (!customRooms.has(code)) {
+      break;
+    }
   }
   return code;
 }
@@ -102,6 +142,28 @@ function removeUserFromQueue(userId: string): void {
   }
 }
 
+function userHasActiveGame(userId: string): boolean {
+  for (const game of activeGames.values()) {
+    if (
+      game.status === 'active' &&
+      ((!game.blackPlayer.isBot && game.blackPlayer.userId === userId) ||
+        (!game.whitePlayer.isBot && game.whitePlayer.userId === userId))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function removeUserRooms(userId: string, io: Server): void {
+  for (const [code, room] of customRooms) {
+    if (room.host.userId === userId) {
+      customRooms.delete(code);
+      io.sockets.sockets.get(room.host.socketId)?.emit('roomCancelled');
+    }
+  }
+}
+
 function getGamePlayer(activeGame: ActiveGame, userId: string): GamePlayer | null {
   if (activeGame.blackPlayer.userId === userId) {
     return activeGame.blackPlayer;
@@ -112,44 +174,6 @@ function getGamePlayer(activeGame: ActiveGame, userId: string): GamePlayer | nul
   }
 
   return null;
-}
-
-async function authenticateSocket(socket: SocketWithUser, token: string): Promise<AuthenticatedSocketData | null> {
-  try {
-    const payload = verifyAuthToken(token);
-
-    // Guest user - no DB lookup needed
-    if (payload.userId.startsWith('guest_')) {
-      const guestUser: AuthenticatedSocketData = {
-        userId: payload.userId,
-        username: `Guest_${payload.userId.slice(-4)}`,
-        rating: 1200,
-        isGuest: true,
-      };
-      socket.data.user = guestUser;
-      return guestUser;
-    }
-
-    const user = await User.findById(payload.userId).select('username rating').lean();
-
-    if (!user) {
-      socket.emit('error', { message: 'Authentication failed.' });
-      return null;
-    }
-
-    const authenticatedUser: AuthenticatedSocketData = {
-      userId: String(user._id),
-      username: user.username,
-      rating: user.rating,
-      isGuest: false,
-    };
-
-    socket.data.user = authenticatedUser;
-    return authenticatedUser;
-  } catch {
-    socket.emit('error', { message: 'Authentication failed.' });
-    return null;
-  }
 }
 
 function emitGameFound(io: Server, activeGame: ActiveGame): void {
@@ -210,71 +234,76 @@ function clearMoveTimer(activeGame: ActiveGame): void {
   }
 }
 
-function clearReconnectTimer(activeGame: ActiveGame, userId: string): void {
-  const timer = activeGame.reconnectTimers.get(userId);
-  if (timer) {
-    clearTimeout(timer);
-    activeGame.reconnectTimers.delete(userId);
-  }
+function triggerBotMove(io: Server, activeGame: ActiveGame): void {
+  if (activeGame.status !== 'active') return;
+
+  const currentPlayerColor = activeGame.state.currentPlayer;
+  const botPlayer = currentPlayerColor === 'black' ? activeGame.blackPlayer : activeGame.whitePlayer;
+
+  if (!botPlayer.isBot || !botPlayer.botDifficulty) return;
+
+  // Simulate a thinking delay between 600ms and 1200ms
+  const delay = Math.floor(Math.random() * (1200 - 600 + 1)) + 600;
+
+  setTimeout(async () => {
+    try {
+      const currentActiveGame = activeGames.get(activeGame.gameId);
+      if (!currentActiveGame || currentActiveGame.status !== 'active') return;
+      if (currentActiveGame.state.currentPlayer !== currentPlayerColor) return;
+
+      const [r, c] = computeBotMove(
+        currentActiveGame.state.board,
+        currentPlayerColor,
+        botPlayer.botDifficulty!
+      );
+
+      const moveResult = processMove(currentActiveGame.state, r, c);
+      if (!moveResult.valid) {
+        console.error('Bot attempted an invalid move:', r, c);
+        return;
+      }
+      const { newState, flipped } = moveResult;
+
+      currentActiveGame.state = newState;
+      await persistMoves(currentActiveGame);
+
+      const lastMove = newState.moveHistory[newState.moveHistory.length - 1] ?? null;
+
+      currentActiveGame.lastMoveAt = Date.now();
+      io.to(currentActiveGame.gameId).emit('gameUpdate', {
+        state: newState,
+        lastMove,
+        flipped,
+        remainingTime: MOVE_TIMEOUT_MS,
+      });
+
+      if (newState.gameStatus === 'finished') {
+        await finishGame(io, currentActiveGame, newState.winner, 'board-complete', 'finished');
+      } else {
+        startMoveTimer(io, currentActiveGame);
+        
+        const nextPlayerColor = newState.currentPlayer;
+        const nextPlayerObj = nextPlayerColor === 'black' ? currentActiveGame.blackPlayer : currentActiveGame.whitePlayer;
+        if (nextPlayerObj.isBot) {
+          triggerBotMove(io, currentActiveGame);
+        }
+      }
+    } catch (err) {
+      console.error('Error during bot move execution:', err);
+    }
+  }, delay);
 }
 
-function clearReconnectTimers(activeGame: ActiveGame): void {
-  for (const timer of activeGame.reconnectTimers.values()) {
-    clearTimeout(timer);
-  }
-  activeGame.reconnectTimers.clear();
-}
-
-function resumeActiveGame(
+async function createActiveGame(
   io: Server,
-  socket: SocketWithUser,
-  user: AuthenticatedSocketData,
-): void {
-  const activeGame = Array.from(activeGames.values()).find(
-    (game) =>
-      game.status === 'active' &&
-      (game.blackPlayer.userId === user.userId || game.whitePlayer.userId === user.userId),
-  );
-
-  if (!activeGame) {
-    return;
+  blackEntry: QueueEntry & { isBot?: boolean; botDifficulty?: '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' },
+  whiteEntry: QueueEntry & { isBot?: boolean; botDifficulty?: '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' },
+  isCustomRoom = false,
+): Promise<void> {
+  if (blackEntry.userId === whiteEntry.userId && !blackEntry.isBot && !whiteEntry.isBot) {
+    throw new Error('A user cannot play against the same account.');
   }
-
-  const player = getGamePlayer(activeGame, user.userId);
-  if (!player || player.socketId === socket.id) {
-    return;
-  }
-
-  socketToGame.delete(player.socketId);
-  player.socketId = socket.id;
-  socketToGame.set(socket.id, activeGame.gameId);
-  socket.join(activeGame.gameId);
-  clearReconnectTimer(activeGame, user.userId);
-
-  const opponent =
-    player.userId === activeGame.blackPlayer.userId
-      ? activeGame.whitePlayer
-      : activeGame.blackPlayer;
-
-  socket.emit('gameResumed', {
-    gameId: activeGame.gameId,
-    yourColor: player.color,
-    opponent: {
-      id: opponent.userId,
-      username: opponent.username,
-      rating: opponent.rating,
-    },
-    state: activeGame.state,
-  });
-
-  io.sockets.sockets.get(opponent.socketId)?.emit('opponentReconnected');
-}
-
-async function createActiveGame(io: Server, first: QueueEntry, second: QueueEntry, isCustomRoom = false): Promise<void> {
-  const blackEntry = first.joinedAt <= second.joinedAt ? first : second;
-  const whiteEntry = blackEntry.socketId === first.socketId ? second : first;
-
-  const hasGuest = !!(blackEntry.isGuest || whiteEntry.isGuest);
+  const hasGuest = !!(blackEntry.isGuest || whiteEntry.isGuest || blackEntry.isBot || whiteEntry.isBot);
   let dbGameId = '';
 
   if (!hasGuest) {
@@ -311,16 +340,19 @@ async function createActiveGame(io: Server, first: QueueEntry, second: QueueEntr
     status: 'active',
     isCustomRoom,
     moveTimer: null,
-    reconnectTimers: new Map(),
     lastMoveAt: Date.now(),
   };
 
   activeGames.set(activeGame.gameId, activeGame);
-  socketToGame.set(blackEntry.socketId, activeGame.gameId);
-  socketToGame.set(whiteEntry.socketId, activeGame.gameId);
+  if (blackEntry.socketId !== 'bot_socket') socketToGame.set(blackEntry.socketId, activeGame.gameId);
+  if (whiteEntry.socketId !== 'bot_socket') socketToGame.set(whiteEntry.socketId, activeGame.gameId);
 
   emitGameFound(io, activeGame);
   startMoveTimer(io, activeGame);
+
+  if (activeGame.blackPlayer.isBot) {
+    triggerBotMove(io, activeGame);
+  }
 }
 
 async function tryMatchmake(io: Server): Promise<void> {
@@ -339,6 +371,7 @@ async function tryMatchmake(io: Server): Promise<void> {
       ) {
         matchmakingQueue.splice(candidateIndex, 1);
         matchmakingQueue.splice(index, 1);
+        // First entry gets black, candidate gets white
         await createActiveGame(io, entry, candidate);
         await tryMatchmake(io);
         return;
@@ -351,17 +384,22 @@ async function persistMoves(activeGame: ActiveGame): Promise<void> {
   const hasGuest = !!(activeGame.blackPlayer.isGuest || activeGame.whitePlayer.isGuest);
   if (hasGuest) return;
 
+  const latestMove = activeGame.state.moveHistory[activeGame.state.moveHistory.length - 1];
+  if (!latestMove) return;
+
   await Game.findByIdAndUpdate(activeGame.dbGameId, {
+    $push: {
+      moves: {
+        player: latestMove.player,
+        row: latestMove.row,
+        col: latestMove.col,
+        flipped: latestMove.flipped,
+        blackScore: latestMove.blackScore,
+        whiteScore: latestMove.whiteScore,
+        timestamp: new Date(latestMove.timestamp),
+      },
+    },
     $set: {
-      moves: activeGame.state.moveHistory.map((move) => ({
-        player: move.player,
-        row: move.row,
-        col: move.col,
-        flipped: move.flipped,
-        blackScore: move.blackScore,
-        whiteScore: move.whiteScore,
-        timestamp: new Date(move.timestamp),
-      })),
       status: activeGame.status,
     },
   });
@@ -391,8 +429,6 @@ async function finishGame(
   }
 
   clearMoveTimer(activeGame);
-  clearReconnectTimers(activeGame);
-
   activeGame.status = status;
   activeGame.state = {
     ...activeGame.state,
@@ -400,6 +436,13 @@ async function finishGame(
     winner,
     legalMoves: [],
   };
+
+  // Notify spectators in the room
+  io.to(activeGame.gameId).emit('spectatorGameOver', {
+    winner,
+    reason,
+    finalState: activeGame.state,
+  });
 
   const hasGuest = !!(activeGame.blackPlayer.isGuest || activeGame.whitePlayer.isGuest);
 
@@ -410,12 +453,12 @@ async function finishGame(
 
   if (!hasGuest) {
     const [blackUser, whiteUser] = await Promise.all([
-      User.findById(activeGame.blackPlayer.userId),
-      User.findById(activeGame.whitePlayer.userId),
+      User.findById(activeGame.blackPlayer.userId).select('rating gamesPlayed').lean(),
+      User.findById(activeGame.whitePlayer.userId).select('rating gamesPlayed').lean(),
     ]);
 
     if (blackUser && whiteUser) {
-      const elo = calculateElo(
+      const { opsA, opsB, eloResult } = getEloUpdateOps(
         blackUser.rating,
         whiteUser.rating,
         blackUser.gamesPlayed,
@@ -423,49 +466,24 @@ async function finishGame(
         getResultForBlack(winner),
       );
 
-      blackUser.rating = elo.newRatingA;
-      whiteUser.rating = elo.newRatingB;
-      blackUser.gamesPlayed += 1;
-      whiteUser.gamesPlayed += 1;
-
-      if (winner === 'black') {
-        blackUser.wins += 1;
-        whiteUser.losses += 1;
-      } else if (winner === 'white') {
-        blackUser.losses += 1;
-        whiteUser.wins += 1;
-      } else {
-        blackUser.draws += 1;
-        whiteUser.draws += 1;
-      }
-
       await Promise.all([
-        blackUser.save(),
-        whiteUser.save(),
+        User.findByIdAndUpdate(activeGame.blackPlayer.userId, { $inc: opsA }),
+        User.findByIdAndUpdate(activeGame.whitePlayer.userId, { $inc: opsB }),
         Game.findByIdAndUpdate(activeGame.dbGameId, {
           $set: {
-            moves: activeGame.state.moveHistory.map((move) => ({
-              player: move.player,
-              row: move.row,
-              col: move.col,
-              flipped: move.flipped,
-              blackScore: move.blackScore,
-              whiteScore: move.whiteScore,
-              timestamp: new Date(move.timestamp),
-            })),
             result: winner,
             status,
             endTime: new Date(),
-            blackRatingChange: elo.changeA,
-            whiteRatingChange: elo.changeB,
+            blackRatingChange: eloResult.changeA,
+            whiteRatingChange: eloResult.changeB,
           },
         }),
       ]);
 
-      eloChangeA = elo.changeA;
-      eloChangeB = elo.changeB;
-      newRatingA = elo.newRatingA;
-      newRatingB = elo.newRatingB;
+      eloChangeA = eloResult.changeA;
+      eloChangeB = eloResult.changeB;
+      newRatingA = eloResult.newRatingA;
+      newRatingB = eloResult.newRatingB;
     }
   }
 
@@ -510,14 +528,51 @@ async function finishGame(
   }
 }
 
+function filterProfanity(text: string): string {
+  const badWords = /\b(shit|fuck|ass|bitch|bastard|cunt|dick|cock|pussy)\b/gi;
+  return text.replace(badWords, '****');
+}
+
 export function initializeGameSocket(io: Server): void {
+  // Authentication middleware
+  io.use(async (socket, next) => {
+    const token = socket.handshake.auth?.token as string | undefined;
+    if (!token) {
+      return next(new Error('Authentication required'));
+    }
+    try {
+      const payload = verifyAuthToken(token);
+      if (payload.userId.startsWith('guest_')) {
+        (socket as SocketWithUser).data.user = {
+          userId: payload.userId,
+          username: `Guest_${payload.userId.slice(-4)}`,
+          rating: 1200,
+          isGuest: true,
+        };
+      } else {
+        const user = await User.findById(payload.userId).select('username rating').lean();
+        if (!user) return next(new Error('User not found'));
+        (socket as SocketWithUser).data.user = {
+          userId: String(user._id),
+          username: user.username,
+          rating: user.rating,
+          isGuest: false,
+        };
+      }
+      next();
+    } catch {
+      next(new Error('Invalid token'));
+    }
+  });
+
   // Periodic cleanup of stale finished games and abandoned rooms
-  setInterval(() => {
+  const cleanupTimer = setInterval(() => {
     const now = Date.now();
 
     // Remove finished/abandoned games older than 30 minutes
     for (const [gameId, game] of activeGames) {
-      if (game.status !== 'active') {
+      if (game.status !== 'active' && (now - game.lastMoveAt > STALE_GAME_CLEANUP_MS)) {
+        clearMoveTimer(game);
         activeGames.delete(gameId);
       }
     }
@@ -531,36 +586,60 @@ export function initializeGameSocket(io: Server): void {
       }
     }
   }, CLEANUP_INTERVAL_MS);
+  cleanupTimer.unref();
+
+  const matchmakingTimer = setInterval(() => {
+    void tryMatchmake(io).catch((error) => console.error('matchmaking interval error:', error));
+  }, 1_000);
+  matchmakingTimer.unref();
 
   io.on('connection', (socket: Socket) => {
     const typedSocket = socket as SocketWithUser;
 
-    socket.on('authenticate', async ({ token }: { token: string }) => {
-      try {
-        const authenticatedUser = await authenticateSocket(typedSocket, token);
-        if (authenticatedUser) {
-          resumeActiveGame(io, typedSocket, authenticatedUser);
-        }
-      } catch (err) {
-        console.error('authenticate error:', err);
-        socket.emit('error', { message: 'Authentication failed.' });
+    // Rate Limiter: max 10 events per socket per second
+    const eventTimes: number[] = [];
+    socket.use((packet, next) => {
+      const now = Date.now();
+      while (eventTimes.length > 0 && eventTimes[0] < now - 1000) {
+        eventTimes.shift();
       }
+      if (eventTimes.length >= 10) {
+        return next(new Error('Rate limit exceeded (max 10 events/sec)'));
+      }
+      eventTimes.push(now);
+      next();
     });
 
-    socket.on('joinQueue', async ({ token }: { token?: string; rating?: number }) => {
+    socket.on('error', (err) => {
+      socket.emit('serverError', { message: err.message });
+    });
+
+    const handleSocketError = (err: unknown, eventName: string) => {
+      if (err instanceof z.ZodError) {
+        const zodErr = err as any;
+        const msg = zodErr.errors?.[0]?.message || zodErr.issues?.[0]?.message || 'Invalid payload';
+        socket.emit('serverError', { message: `Validation error in ${eventName}: ${msg}` });
+      } else {
+        console.error(`${eventName} error:`, err);
+        socket.emit('serverError', { message: `Failed to process ${eventName}.` });
+      }
+    };
+
+    socket.on('joinQueue', async () => {
       try {
-        const authenticatedUser = typedSocket.data.user ?? (token ? await authenticateSocket(typedSocket, token) : null);
+        const authenticatedUser = typedSocket.data.user;
 
         if (!authenticatedUser) {
-          socket.emit('error', { message: 'You must authenticate before joining the queue.' });
+          socket.emit('serverError', { message: 'You must authenticate before joining the queue.' });
           return;
         }
 
-        if (socketToGame.has(socket.id)) {
-          socket.emit('error', { message: 'You are already in an active game.' });
+        if (socketToGame.has(socket.id) || userHasActiveGame(authenticatedUser.userId)) {
+          socket.emit('serverError', { message: 'You are already in an active game.' });
           return;
         }
 
+        removeUserRooms(authenticatedUser.userId, io);
         // Prevent same user from joining queue across multiple tabs
         removeUserFromQueue(authenticatedUser.userId);
         removeFromQueue(socket.id);
@@ -575,7 +654,7 @@ export function initializeGameSocket(io: Server): void {
         await tryMatchmake(io);
       } catch (err) {
         console.error('joinQueue error:', err);
-        socket.emit('error', { message: 'Failed to join the queue.' });
+        socket.emit('serverError', { message: 'Failed to join the queue.' });
       }
     });
 
@@ -584,21 +663,101 @@ export function initializeGameSocket(io: Server): void {
       socket.emit('queueLeft');
     });
 
-    socket.on('createRoom', async ({ token }: { token?: string }) => {
+    socket.on('startBotGame', async (payload) => {
       try {
-        const authenticatedUser = typedSocket.data.user ?? (token ? await authenticateSocket(typedSocket, token) : null);
+        const { difficulty, playerColor } = startBotGameSchema.parse(payload);
+        const authenticatedUser = typedSocket.data.user;
 
         if (!authenticatedUser) {
-          socket.emit('error', { message: 'You must authenticate before creating a room.' });
+          socket.emit('serverError', { message: 'You must authenticate before starting a game.' });
           return;
         }
 
-        if (socketToGame.has(socket.id)) {
-          socket.emit('error', { message: 'You are already in an active game.' });
+        if (socketToGame.has(socket.id) || userHasActiveGame(authenticatedUser.userId)) {
+          socket.emit('serverError', { message: 'You are already in an active game.' });
           return;
         }
 
-        // Remove from any existing room
+        removeUserFromQueue(authenticatedUser.userId);
+        removeUserRooms(authenticatedUser.userId, io);
+
+        let humanColor: Player = 'black';
+        if (playerColor === 'random') {
+          humanColor = Math.random() < 0.5 ? 'black' : 'white';
+        } else {
+          humanColor = playerColor;
+        }
+
+        const botDetails: Record<string, { rating: number; name: string }> = {
+          '1': { rating: 200, name: 'Novice Nebula' },
+          '2': { rating: 400, name: 'Comet Cadet' },
+          '3': { rating: 600, name: 'Meteor Scout' },
+          '4': { rating: 900, name: 'Gravity Guard' },
+          '5': { rating: 1200, name: 'Orbit Officer' },
+          '6': { rating: 1500, name: 'Proton Pilot' },
+          '7': { rating: 1700, name: 'Sly Sentinel' },
+          '8': { rating: 1900, name: 'Nebula Knight' },
+          '9': { rating: 2100, name: 'Galaxy Guardian' },
+          '10': { rating: 2400, name: 'Grandmaster Orion' },
+        };
+
+        const botInfo = botDetails[difficulty] || { rating: 1200, name: 'Computer' };
+        const botRating = botInfo.rating;
+        const botUsername = `${botInfo.name} (${botInfo.rating})`;
+
+        const humanPlayerEntry = {
+          ...authenticatedUser,
+          socketId: socket.id,
+          joinedAt: Date.now(),
+        };
+
+        const botPlayerEntry = {
+          userId: `bot_${difficulty}`,
+          username: botUsername,
+          rating: botRating,
+          isGuest: true,
+          socketId: 'bot_socket',
+          joinedAt: Date.now(),
+        };
+
+        const blackEntry = humanColor === 'black' ? humanPlayerEntry : { ...botPlayerEntry, isBot: true, botDifficulty: difficulty };
+        const whiteEntry = humanColor === 'white' ? humanPlayerEntry : { ...botPlayerEntry, isBot: true, botDifficulty: difficulty };
+
+        await createActiveGame(io, blackEntry, whiteEntry);
+      } catch (err) {
+        handleSocketError(err, 'startBotGame');
+      }
+    });
+
+    socket.on('createRoom', async () => {
+      try {
+        const authenticatedUser = typedSocket.data.user;
+
+        if (!authenticatedUser) {
+          socket.emit('serverError', { message: 'You must authenticate before creating a room.' });
+          return;
+        }
+
+        if (socketToGame.has(socket.id) || userHasActiveGame(authenticatedUser.userId)) {
+          socket.emit('serverError', { message: 'You are already in an active game.' });
+          return;
+        }
+
+        removeUserFromQueue(authenticatedUser.userId);
+
+        // Limit custom rooms: check if user already has a custom room
+        let userRoomCount = 0;
+        for (const room of customRooms.values()) {
+          if (room.host.userId === authenticatedUser.userId) {
+            userRoomCount++;
+          }
+        }
+        if (userRoomCount >= 1) {
+          socket.emit('serverError', { message: 'You can only host one room at a time.' });
+          return;
+        }
+
+        // Remove from any existing room hosted by this socket
         for (const [code, room] of customRooms) {
           if (room.host.socketId === socket.id) {
             customRooms.delete(code);
@@ -619,21 +778,22 @@ export function initializeGameSocket(io: Server): void {
         socket.emit('roomCreated', { roomCode });
       } catch (err) {
         console.error('createRoom error:', err);
-        socket.emit('error', { message: 'Failed to create room.' });
+        socket.emit('serverError', { message: 'Failed to create room.' });
       }
     });
 
-    socket.on('joinRoom', async ({ token, roomCode }: { token?: string; roomCode: string }) => {
+    socket.on('joinRoom', async (payload) => {
       try {
-        const authenticatedUser = typedSocket.data.user ?? (token ? await authenticateSocket(typedSocket, token) : null);
+        const { roomCode } = joinRoomSchema.parse(payload);
+        const authenticatedUser = typedSocket.data.user;
 
         if (!authenticatedUser) {
-          socket.emit('error', { message: 'You must authenticate before joining a room.' });
+          socket.emit('serverError', { message: 'You must authenticate before joining a room.' });
           return;
         }
 
-        if (socketToGame.has(socket.id)) {
-          socket.emit('error', { message: 'You are already in an active game.' });
+        if (socketToGame.has(socket.id) || userHasActiveGame(authenticatedUser.userId)) {
+          socket.emit('serverError', { message: 'You are already in an active game.' });
           return;
         }
 
@@ -645,12 +805,20 @@ export function initializeGameSocket(io: Server): void {
           return;
         }
 
-        if (room.host.socketId === socket.id) {
+        if (room.host.userId === authenticatedUser.userId) {
           socket.emit('roomError', { message: 'You cannot join your own room.' });
           return;
         }
 
+        if (userHasActiveGame(room.host.userId) || !io.sockets.sockets.get(room.host.socketId)?.connected) {
+          customRooms.delete(code);
+          socket.emit('roomError', { message: 'The host is no longer available.' });
+          return;
+        }
+
         customRooms.delete(code);
+        removeUserFromQueue(authenticatedUser.userId);
+        removeUserRooms(authenticatedUser.userId, io);
 
         const joiner: QueueEntry = {
           ...authenticatedUser,
@@ -658,10 +826,10 @@ export function initializeGameSocket(io: Server): void {
           joinedAt: Date.now(),
         };
 
+        // Host gets black, joiner gets white
         await createActiveGame(io, room.host, joiner, true);
       } catch (err) {
-        console.error('joinRoom error:', err);
-        socket.emit('error', { message: 'Failed to join room.' });
+        handleSocketError(err, 'joinRoom');
       }
     });
 
@@ -675,8 +843,58 @@ export function initializeGameSocket(io: Server): void {
       }
     });
 
-    socket.on('makeMove', async ({ gameId, row, col }: { gameId: string; row: number; col: number }) => {
+    socket.on('rejoinGame', async (payload) => {
       try {
+        const { gameId } = gameIdSchema.parse(payload);
+        const authenticatedUser = typedSocket.data.user;
+        if (!authenticatedUser) {
+          socket.emit('serverError', { message: 'Authentication required' });
+          return;
+        }
+
+        const activeGame = activeGames.get(gameId);
+        if (!activeGame || activeGame.status !== 'active') {
+          socket.emit('serverError', { message: 'Game not found or finished' });
+          return;
+        }
+
+        const player = getGamePlayer(activeGame, authenticatedUser.userId);
+        if (!player) {
+          socket.emit('serverError', { message: 'You are not a player in this game' });
+          return;
+        }
+
+        // Reconnect this player
+        player.socketId = socket.id;
+        socketToGame.set(socket.id, gameId);
+        socket.join(gameId);
+
+        // Clear disconnect timer if it exists
+        if (activeGame.disconnectTimer) {
+          clearTimeout(activeGame.disconnectTimer);
+          activeGame.disconnectTimer = undefined;
+        }
+
+        // Notify opponent that player has reconnected
+        socket.to(gameId).emit('opponentReconnected', { userId: authenticatedUser.userId });
+
+        // Send current game state and remaining time
+        const remainingTime = Math.max(0, MOVE_TIMEOUT_MS - (Date.now() - activeGame.lastMoveAt));
+        socket.emit('gameRejoined', {
+          gameId,
+          yourColor: player.color,
+          state: activeGame.state,
+          remainingTime,
+        });
+      } catch (err) {
+        handleSocketError(err, 'rejoinGame');
+      }
+    });
+
+    socket.on('makeMove', async (payload) => {
+      try {
+        const { gameId, row, col } = makeMoveSchema.parse(payload);
+
         const authenticatedUser = typedSocket.data.user;
         const activeGame = activeGames.get(gameId);
 
@@ -702,38 +920,52 @@ export function initializeGameSocket(io: Server): void {
           return;
         }
 
-        const { newState, flipped, valid } = processMove(activeGame.state, row, col);
+        const moveResult = processMove(activeGame.state, row, col);
 
-        if (!valid) {
+        if (!moveResult.valid) {
           socket.emit('invalidMove', { reason: 'That move is not legal.' });
           return;
         }
+
+        const { newState, flipped } = moveResult;
 
         activeGame.state = newState;
         await persistMoves(activeGame);
 
         const lastMove = newState.moveHistory[newState.moveHistory.length - 1] ?? null;
 
+        // Reset timer and emit game update with remaining time (full turn time since it starts now)
+        activeGame.lastMoveAt = Date.now();
         io.to(gameId).emit('gameUpdate', {
           state: newState,
           lastMove,
           flipped,
+          remainingTime: MOVE_TIMEOUT_MS,
         });
 
         if (newState.gameStatus === 'finished') {
           await finishGame(io, activeGame, newState.winner, 'board-complete', 'finished');
         } else {
-          // Reset move timer for next player
           startMoveTimer(io, activeGame);
+          const nextPlayerColor = newState.currentPlayer;
+          const nextPlayerObj = nextPlayerColor === 'black' ? activeGame.blackPlayer : activeGame.whitePlayer;
+          if (nextPlayerObj.isBot) {
+            triggerBotMove(io, activeGame);
+          }
         }
       } catch (err) {
-        console.error('makeMove error:', err);
-        socket.emit('invalidMove', { reason: 'An unexpected error occurred.' });
+        if (err instanceof z.ZodError) {
+          socket.emit('invalidMove', { reason: 'Invalid move parameters.' });
+        } else {
+          console.error('makeMove error:', err);
+          socket.emit('invalidMove', { reason: 'An unexpected error occurred.' });
+        }
       }
     });
 
-    socket.on('resign', async ({ gameId }: { gameId: string }) => {
+    socket.on('resign', async (payload) => {
       try {
+        const { gameId } = gameIdSchema.parse(payload);
         const authenticatedUser = typedSocket.data.user;
         const activeGame = activeGames.get(gameId);
 
@@ -754,8 +986,9 @@ export function initializeGameSocket(io: Server): void {
       }
     });
 
-    socket.on('requestRematch', async ({ gameId }: { gameId: string }) => {
+    socket.on('requestRematch', async (payload) => {
       try {
+        const { gameId } = gameIdSchema.parse(payload);
         const authenticatedUser = typedSocket.data.user;
         const activeGame = activeGames.get(gameId);
 
@@ -773,17 +1006,23 @@ export function initializeGameSocket(io: Server): void {
 
         const opponent =
           player.userId === activeGame.blackPlayer.userId ? activeGame.whitePlayer : activeGame.blackPlayer;
-        const opponentSocket = io.sockets.sockets.get(opponent.socketId);
-        opponentSocket?.emit('rematchRequested');
+        
+        if (opponent.isBot) {
+          activeGame.rematchVotes.add(opponent.userId);
+        } else {
+          const opponentSocket = io.sockets.sockets.get(opponent.socketId);
+          opponentSocket?.emit('rematchRequested');
+        }
 
         if (activeGame.rematchVotes.size < 2) {
           return;
         }
 
         activeGames.delete(activeGame.gameId);
-        socketToGame.delete(activeGame.blackPlayer.socketId);
-        socketToGame.delete(activeGame.whitePlayer.socketId);
+        if (activeGame.blackPlayer.socketId !== 'bot_socket') socketToGame.delete(activeGame.blackPlayer.socketId);
+        if (activeGame.whitePlayer.socketId !== 'bot_socket') socketToGame.delete(activeGame.whitePlayer.socketId);
 
+        // Swap colors for rematch: the previous white player gets black, and the previous black player gets white
         await createActiveGame(
           io,
           {
@@ -800,6 +1039,123 @@ export function initializeGameSocket(io: Server): void {
         );
       } catch (err) {
         console.error('requestRematch error:', err);
+      }
+    });
+
+    // Chat support
+    let lastChatTimestamp = 0;
+    socket.on('chatMessage', async (payload) => {
+      try {
+        const { gameId, message } = chatMessageSchema.parse(payload);
+        const now = Date.now();
+        if (now - lastChatTimestamp < 1000) {
+          socket.emit('serverError', { message: 'Chat rate limit exceeded. Please wait.' });
+          return;
+        }
+        lastChatTimestamp = now;
+
+        if (!message || message.trim().length === 0) return;
+        const cleanMessage = filterProfanity(message.slice(0, 200));
+
+        io.to(gameId).emit('chatMessage', {
+          sender: typedSocket.data.user?.username ?? 'System',
+          message: cleanMessage,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error('chatMessage error:', err);
+      }
+    });
+
+    // Draw offer events
+    socket.on('offerDraw', async (payload) => {
+      try {
+        const { gameId } = gameIdSchema.parse(payload);
+        const activeGame = activeGames.get(gameId);
+        if (!activeGame || activeGame.status !== 'active') return;
+
+        const player = getGamePlayer(activeGame, typedSocket.data.user!.userId);
+        if (!player) return;
+
+        socket.to(gameId).emit('drawOffered', { offeredBy: player.color });
+      } catch (err) {
+        console.error('offerDraw error:', err);
+      }
+    });
+
+    socket.on('respondDraw', async (payload) => {
+      try {
+        const { gameId, accept } = respondDrawSchema.parse(payload);
+        const activeGame = activeGames.get(gameId);
+        if (!activeGame || activeGame.status !== 'active') return;
+
+        const player = getGamePlayer(activeGame, typedSocket.data.user!.userId);
+        if (!player) return;
+
+        if (accept) {
+          await finishGame(io, activeGame, 'draw', 'draw-agreement', 'finished');
+        } else {
+          socket.to(gameId).emit('drawDeclined');
+        }
+      } catch (err) {
+        console.error('respondDraw error:', err);
+      }
+    });
+
+    // Spectator support
+    socket.on('spectateGame', async (payload) => {
+      try {
+        const { gameId } = gameIdSchema.parse(payload);
+        const activeGame = activeGames.get(gameId);
+        if (!activeGame) {
+          socket.emit('serverError', { message: 'Game not found.' });
+          return;
+        }
+        if (activeGame.isCustomRoom) {
+          socket.emit('serverError', { message: 'Private room games cannot be spectated.' });
+          return;
+        }
+        socket.join(gameId);
+        socket.emit('spectateSuccess', {
+          gameId,
+          state: activeGame.state,
+          blackPlayer: {
+            username: activeGame.blackPlayer.username,
+            rating: activeGame.blackPlayer.rating,
+          },
+          whitePlayer: {
+            username: activeGame.whitePlayer.username,
+            rating: activeGame.whitePlayer.rating,
+          },
+        });
+      } catch (err) {
+        console.error('spectateGame error:', err);
+      }
+    });
+
+    socket.on('listActiveGames', () => {
+      try {
+        const games = Array.from(activeGames.values())
+          .filter((g) => g.status === 'active' && !g.isCustomRoom)
+          .map((g) => ({
+            gameId: g.gameId,
+            blackPlayer: {
+              username: g.blackPlayer.username,
+              rating: g.blackPlayer.rating,
+            },
+            whitePlayer: {
+              username: g.whitePlayer.username,
+              rating: g.whitePlayer.rating,
+            },
+            score: {
+              black: g.state.blackScore,
+              white: g.state.whiteScore,
+            },
+            currentPlayer: g.state.currentPlayer,
+          }));
+        socket.emit('activeGamesList', games);
+      } catch (err) {
+        console.error('listActiveGames error:', err);
       }
     });
 
@@ -826,29 +1182,30 @@ export function initializeGameSocket(io: Server): void {
           return;
         }
 
+        const isBotGame = !!(activeGame.blackPlayer.isBot || activeGame.whitePlayer.isBot);
+        if (isBotGame) {
+          clearMoveTimer(activeGame);
+          activeGame.status = 'abandoned';
+          activeGames.delete(gameId);
+          return;
+        }
+
         const disconnectedPlayer =
           activeGame.blackPlayer.socketId === socket.id ? activeGame.blackPlayer : activeGame.whitePlayer;
-        const opponent =
-          disconnectedPlayer.userId === activeGame.blackPlayer.userId
-            ? activeGame.whitePlayer
-            : activeGame.blackPlayer;
-        const reconnectDeadline = Date.now() + RECONNECT_GRACE_MS;
+        const remainingPlayer =
+          activeGame.blackPlayer.socketId === socket.id ? activeGame.whitePlayer : activeGame.blackPlayer;
 
-        clearReconnectTimer(activeGame, disconnectedPlayer.userId);
-        io.sockets.sockets.get(opponent.socketId)?.emit('opponentDisconnected', { reconnectDeadline });
-
-        const disconnectedSocketId = socket.id;
-        const reconnectTimer = setTimeout(async () => {
-          activeGame.reconnectTimers.delete(disconnectedPlayer.userId);
-          if (activeGame.status !== 'active' || disconnectedPlayer.socketId !== disconnectedSocketId) {
-            return;
+        // Set a 30-second disconnect timer before forfeiting
+        const timer = setTimeout(async () => {
+          if (activeGame.status === 'active') {
+            const winner: Player = disconnectedPlayer.color === 'black' ? 'white' : 'black';
+            await finishGame(io, activeGame, winner, 'disconnect-forfeit', 'abandoned');
           }
+        }, 30_000);
+        activeGame.disconnectTimer = timer;
 
-          const winner: Player = disconnectedPlayer.color === 'black' ? 'white' : 'black';
-          await finishGame(io, activeGame, winner, 'disconnect-forfeit', 'abandoned');
-        }, RECONNECT_GRACE_MS);
-
-        activeGame.reconnectTimers.set(disconnectedPlayer.userId, reconnectTimer);
+        const remainingSocket = io.sockets.sockets.get(remainingPlayer.socketId);
+        remainingSocket?.emit('opponentDisconnected', { userId: disconnectedPlayer.userId });
       } catch (err) {
         console.error('disconnect cleanup error:', err);
       }

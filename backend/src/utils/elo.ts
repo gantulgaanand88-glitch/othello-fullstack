@@ -69,3 +69,19 @@ export function getPlayerRank(rating: number): string {
 
   return 'Master';
 }
+
+export function getEloUpdateOps(
+  ratingA: number,
+  ratingB: number,
+  gamesPlayedA: number,
+  gamesPlayedB: number,
+  result: MatchResult,
+): { opsA: Record<string, number>; opsB: Record<string, number>; eloResult: EloCalculationResult } {
+  const elo = calculateElo(ratingA, ratingB, gamesPlayedA, gamesPlayedB, result);
+  const opsA: Record<string, number> = { rating: elo.changeA, gamesPlayed: 1 };
+  const opsB: Record<string, number> = { rating: elo.changeB, gamesPlayed: 1 };
+  if (result === 'win') { opsA.wins = 1; opsB.losses = 1; }
+  else if (result === 'loss') { opsA.losses = 1; opsB.wins = 1; }
+  else { opsA.draws = 1; opsB.draws = 1; }
+  return { opsA, opsB, eloResult: elo };
+}

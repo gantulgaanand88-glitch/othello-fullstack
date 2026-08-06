@@ -91,7 +91,6 @@ const gameSchema = new Schema(
   },
   {
     timestamps: true,
-    versionKey: false,
   },
 );
 

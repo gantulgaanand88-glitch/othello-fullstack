@@ -1,200 +1,184 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-
-import { fetchLeaderboard, loginAsGuest, setAuthToken } from '../services/api';
-import type { AuthUser, LeaderboardEntry } from '../types';
-
-interface LandingPageProps {
-  user: AuthUser | null;
-  onOpenAuth: (mode?: 'login' | 'register') => void;
-}
+import { Link, useNavigate } from 'react-router-dom';
+import { fetchLeaderboard } from '../services/api';
+import type { LeaderboardEntry } from '../types';
+import { useAuth } from '../context/AuthContext';
 
 const FEATURES = [
-  {
-    icon: '⚡',
-    title: 'Instant Matchmaking',
-    desc: 'Rating-based pairing that widens intelligently.',
-  },
-  {
-    icon: '📊',
-    title: 'ELO Ranking',
-    desc: 'Every win and loss adjusts your competitive rating.',
-  },
-  {
-    icon: '🎯',
-    title: 'Move Analysis',
-    desc: 'Full move history with board-coordinate notation.',
-  },
-  {
-    icon: '🔒',
-    title: 'Private Rooms',
-    desc: 'Create a room code and play with friends.',
-  },
+  { num: '01', title: 'Rated Matchmaking',  desc: 'Elo-based pairing with intelligent window expansion. No waiting forever.' },
+  { num: '02', title: 'Live ELO Rankings',  desc: 'Every result updates your rating instantly using standard chess Elo math.' },
+  { num: '03', title: 'Move Analysis',       desc: 'Full move history with board-coordinate notation and flip animations.' },
+  { num: '04', title: 'Private Rooms',       desc: 'Generate a 6-digit code and play directly with a friend.' },
 ];
 
-export function LandingPage({ user, onOpenAuth }: LandingPageProps) {
+const RANK_COLORS: Record<string, string> = {
+  Beginner: '#4b5563', Intermediate: '#4c7fc9',
+  Advanced: '#9b6bbf', Expert: '#c87c3e', Master: '#c9a84c',
+};
+
+export function LandingPage() {
+  const { user, openAuthModal, loginAsGuest } = useAuth();
+  const navigate = useNavigate();
   const [leaders, setLeaders] = useState<LeaderboardEntry[]>([]);
+  const [loadingGuest, setLoadingGuest] = useState(false);
 
   useEffect(() => {
     fetchLeaderboard()
-      .then((entries) => setLeaders(entries.slice(0, 5)))
+      .then(e => setLeaders(e.slice(0, 5)))
       .catch(() => setLeaders([]));
   }, []);
 
-  const handlePlayAsGuest = async () => {
-    try {
-      const response = await loginAsGuest();
-      setAuthToken(response.token);
-      window.localStorage.setItem(
-        'othello-auth',
-        JSON.stringify(response),
-      );
-      window.location.href = '/game';
-    } catch {
-      onOpenAuth('login');
-    }
+  const handleGuest = async () => {
+    setLoadingGuest(true);
+    try { await loginAsGuest(); navigate('/game'); }
+    catch { openAuthModal('login'); }
+    finally { setLoadingGuest(false); }
   };
 
   return (
-    <div className="space-y-8">
-      <section className="grid gap-8 lg:grid-cols-[1.3fr_0.7fr]">
-        <div className="rounded-[2rem] border border-gray-800 bg-gradient-to-br from-gray-800 via-gray-900 to-green-950/70 p-8 shadow-2xl lg:p-12">
-          <p className="text-sm uppercase tracking-[0.35em] text-green-400">Competitive Othello</p>
-          <h1 className="mt-4 max-w-2xl text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
-            Live ranked Reversi with instant matchmaking, clean analysis, and tournament-level polish.
-          </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-relaxed text-gray-300">
-            Challenge players online, climb the leaderboard, and review every move in a modern multiplayer arena built for serious play.
-          </p>
+    <div className="max-w-6xl mx-auto px-5">
 
-          <div className="mt-8 flex flex-col gap-4 sm:flex-row">
-            <Link
-              to="/game"
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-500 hover:shadow-lg hover:shadow-green-500/20"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
-              </svg>
-              Play Online
-            </Link>
-            {!user ? (
+      {/* ── Hero ──────────────────────────────────────────────────────── */}
+      <section className="grid lg:grid-cols-[1.35fr_0.65fr] gap-12 py-20 border-b border-border">
+        <div>
+          <p className="font-mono text-2xs tracking-widest uppercase text-gold">Competitive Reversi</p>
+          <h1 className="font-serif text-5xl lg:text-7xl text-ink leading-none tracking-tight mt-3">
+            Ranked<br />
+            <em className="not-italic text-gold">Othello</em>,<br />
+            live.
+          </h1>
+          <p className="text-ink-muted text-base leading-relaxed mt-6 max-w-prose">
+            Challenge players online, climb the leaderboard, and review every
+            move in a multiplayer arena built for serious play.
+          </p>
+          <div className="flex flex-wrap gap-3 mt-8">
+            <Link to="/game" className="btn-gold">Play Now</Link>
+            {!user && (
               <>
-                <button
-                  type="button"
-                  onClick={() => onOpenAuth('register')}
-                  className="inline-flex items-center justify-center rounded-full border border-gray-700 px-6 py-3 text-sm font-semibold text-gray-200 transition hover:border-green-500/50 hover:bg-green-500/10 hover:text-white"
-                >
+                <button type="button" onClick={() => openAuthModal('register')} className="btn-outline">
                   Create Account
                 </button>
-                <button
-                  type="button"
-                  onClick={handlePlayAsGuest}
-                  className="inline-flex items-center justify-center rounded-full border border-gray-600 bg-gray-700/50 px-6 py-3 text-sm font-semibold text-gray-200 transition hover:bg-gray-700"
-                >
-                  ⚡ Play as Guest
+                <button type="button" onClick={handleGuest} disabled={loadingGuest} className="btn-ghost">
+                  {loadingGuest ? 'Starting…' : 'Play as Guest →'}
                 </button>
               </>
-            ) : null}
+            )}
           </div>
         </div>
 
-        <div className="rounded-[2rem] border border-gray-800 bg-gray-800/80 p-8 shadow-xl backdrop-blur">
-          <p className="text-sm uppercase tracking-[0.25em] text-green-400">Your Profile</p>
+        {/* Profile card */}
+        <div className="border-l border-border pl-10 hidden lg:block">
+          <p className="font-mono text-2xs tracking-widest uppercase text-ink-faint">Your Status</p>
           {user ? (
-            <div className="mt-5 space-y-5">
-              <div>
-                <h2 className="text-2xl font-semibold text-white">{user.username}</h2>
-                <p className="mt-1 text-sm text-gray-400">
-                  {user.isGuest ? 'Guest Player' : (
-                    <>Rank: <span className="text-green-400">{user.rank}</span> &bull; Rating: <span className="font-semibold text-white">{user.rating}</span></>
-                  )}
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="rounded-2xl border border-gray-700 bg-gray-900/70 p-4 transition hover:border-gray-600">
-                  <p className="text-sm text-gray-400">Games</p>
-                  <p className="mt-2 text-2xl font-semibold tabular-nums text-white">{user.gamesPlayed}</p>
+            <div className="mt-4">
+              <p className="font-serif text-2xl text-ink">{user.username}</p>
+              <p className="font-mono text-xs text-ink-muted mt-1 nums">
+                {user.isGuest ? 'Guest Player' : `${user.rank} · ${user.rating} ELO`}
+              </p>
+              {!user.isGuest && (
+                <div className="mt-6 divide-y divide-border">
+                  {[
+                    { label: 'Games',  value: user.gamesPlayed },
+                    { label: 'Wins',   value: user.wins,   color: 'text-success' },
+                    { label: 'Losses', value: user.losses, color: 'text-danger' },
+                    { label: 'Draws',  value: user.draws },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="py-3 flex items-center justify-between">
+                      <span className="font-mono text-2xs uppercase tracking-widest text-ink-faint">{label}</span>
+                      <span className={`font-mono text-xl nums ${color ?? 'text-ink'}`}>{value}</span>
+                    </div>
+                  ))}
                 </div>
-                <div className="rounded-2xl border border-gray-700 bg-gray-900/70 p-4 transition hover:border-gray-600">
-                  <p className="text-sm text-gray-400">Wins</p>
-                  <p className="mt-2 text-2xl font-semibold tabular-nums text-green-400">{user.wins}</p>
-                </div>
-                <div className="rounded-2xl border border-gray-700 bg-gray-900/70 p-4 transition hover:border-gray-600">
-                  <p className="text-sm text-gray-400">Losses</p>
-                  <p className="mt-2 text-2xl font-semibold tabular-nums text-red-400">{user.losses}</p>
-                </div>
-                <div className="rounded-2xl border border-gray-700 bg-gray-900/70 p-4 transition hover:border-gray-600">
-                  <p className="text-sm text-gray-400">Draws</p>
-                  <p className="mt-2 text-2xl font-semibold tabular-nums text-yellow-400">{user.draws}</p>
-                </div>
-              </div>
+              )}
             </div>
           ) : (
-            <div className="mt-5 flex flex-col items-center gap-4 rounded-2xl border border-dashed border-gray-700 bg-gray-900/50 p-6 text-center">
-              <div className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-green-500/10 text-2xl">
-                🏆
-              </div>
-              <p className="text-sm text-gray-300">
-                Sign in to unlock ranked matchmaking, persistent ratings, and your match history.
+            <div className="mt-4">
+              <p className="text-sm text-ink-muted leading-relaxed max-w-[24ch]">
+                Sign in to unlock rated matchmaking, persistent rankings, and full match history.
               </p>
+              <button type="button" onClick={() => openAuthModal('login')} className="btn-outline mt-5">
+                Sign In
+              </button>
             </div>
           )}
         </div>
       </section>
 
-      {/* Features grid */}
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {FEATURES.map((feature) => (
-          <div
-            key={feature.title}
-            className="rounded-2xl border border-gray-800 bg-gray-800/60 p-6 shadow-lg transition hover:border-green-500/30 hover:bg-gray-800/80"
-          >
-            <span className="text-2xl">{feature.icon}</span>
-            <h3 className="mt-3 font-semibold text-white">{feature.title}</h3>
-            <p className="mt-2 text-sm text-gray-400">{feature.desc}</p>
-          </div>
-        ))}
-      </section>
-
-      <section className="rounded-[2rem] border border-gray-800 bg-gray-800/80 p-8 shadow-xl backdrop-blur">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm uppercase tracking-[0.25em] text-green-400">Top Players</p>
-            <h2 className="mt-2 text-2xl font-semibold text-white">Leaderboard Preview</h2>
-          </div>
-          <Link to="/leaderboard" className="text-sm font-medium text-green-400 transition hover:text-green-300">
-            View full leaderboard →
-          </Link>
+      {/* ── Features ──────────────────────────────────────────────────── */}
+      <section className="grid lg:grid-cols-2 gap-x-16 py-16 border-b border-border">
+        <div>
+          <p className="font-mono text-2xs tracking-widest uppercase text-gold">What's Included</p>
+          <h2 className="font-serif text-4xl text-ink leading-tight mt-2">Built for<br />serious play.</h2>
         </div>
-
-        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          {leaders.length === 0 ? (
-            <p className="col-span-full py-4 text-center text-sm text-gray-500">
-              No ranked players yet. Be the first!
-            </p>
-          ) : null}
-          {leaders.map((leader, index) => (
-            <div
-              key={leader.id}
-              className={[
-                'rounded-3xl border bg-gray-900/70 p-5 transition hover:border-green-500/30',
-                index === 0 ? 'border-yellow-500/30' : 'border-gray-700',
-              ].join(' ')}
-            >
-              <p className="text-sm text-gray-500">
-                {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '#'}{leader.position}
-              </p>
-              <h3 className="mt-3 text-xl font-semibold text-white">{leader.username}</h3>
-              <p className="mt-1 text-sm text-gray-400">{leader.rank}</p>
-              <p className="mt-5 text-3xl font-semibold text-green-400">{leader.rating}</p>
+        <div className="divide-y divide-border mt-6 lg:mt-0">
+          {FEATURES.map(f => (
+            <div key={f.num} className="py-5 grid grid-cols-[2rem_1fr] gap-4">
+              <span className="font-mono text-2xs text-ink-faint pt-0.5">{f.num}</span>
+              <div>
+                <div className="text-sm font-medium text-ink">{f.title}</div>
+                <div className="text-sm text-ink-muted mt-1 leading-relaxed">{f.desc}</div>
+              </div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-gray-800 py-8 text-center text-xs text-gray-600">
-        <p>Othello Arena &bull; Built with React, Socket.io, MongoDB &bull; © {new Date().getFullYear()}</p>
+      {/* ── Leaderboard preview ────────────────────────────────────────── */}
+      <section className="py-16">
+        <div className="flex items-baseline justify-between mb-8">
+          <div>
+            <p className="font-mono text-2xs tracking-widest uppercase text-gold">Global Rankings</p>
+            <h2 className="font-serif text-4xl text-ink mt-1">Top Players</h2>
+          </div>
+          <Link to="/leaderboard" className="font-mono text-2xs text-ink-faint hover:text-gold uppercase tracking-wider transition-colors">
+            Full Table →
+          </Link>
+        </div>
+
+        {leaders.length === 0 ? (
+          <p className="font-mono text-sm text-ink-faint py-8">No ranked players yet — be the first.</p>
+        ) : (
+          <table className="lb-table">
+            <thead><tr><th>#</th><th>Player</th><th>Rank</th><th className="text-right">ELO</th></tr></thead>
+            <tbody>
+              {leaders.map((l, i) => (
+                <tr key={l.id}>
+                  <td className="font-mono text-ink-faint nums w-12">
+                    {i < 3 && (
+                      <span
+                        className="inline-block w-0.5 h-4 mr-2 rounded-sm align-middle"
+                        style={{ background: i === 0 ? '#c9a84c' : i === 1 ? '#9ca3af' : '#8b6a3e' }}
+                      />
+                    )}
+                    {l.position}
+                  </td>
+                  <td className="font-medium text-ink">{l.username}</td>
+                  <td
+                    className="font-mono text-2xs uppercase tracking-wider"
+                    style={{ color: RANK_COLORS[l.rank] ?? '#6b7280' }}
+                  >
+                    {l.rank}
+                  </td>
+                  <td className="font-mono text-gold nums text-right font-medium">{l.rating}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      {/* ── Footer ────────────────────────────────────────────────────── */}
+      <footer className="border-t border-border py-8 flex flex-wrap items-center justify-between gap-4">
+        <p className="font-mono text-2xs text-ink-faint uppercase tracking-wider">
+          Othello Arena · © {new Date().getFullYear()}
+        </p>
+        <div className="flex gap-5">
+          {[{ to: '/privacy', label: 'Privacy' }, { to: '/terms', label: 'Terms' }].map(({ to, label }) => (
+            <Link key={to} to={to} className="font-mono text-2xs text-ink-faint hover:text-ink-muted uppercase tracking-wider transition-colors">
+              {label}
+            </Link>
+          ))}
+        </div>
       </footer>
     </div>
   );

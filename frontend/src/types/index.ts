@@ -57,6 +57,43 @@ export interface OpponentSummary {
   id: string;
   username: string;
   rating: number;
+  rank?: string;
+}
+
+export interface RecentGame {
+  gameId: string;
+  opponent: string;
+  result: 'win' | 'loss' | 'draw';
+  ratingChange: number;
+  date: string;
+}
+
+export interface UserProfileResponse {
+  id: string;
+  username: string;
+  rating: number;
+  rank: string;
+  gamesPlayed: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  memberSince: string;
+  recentGames: RecentGame[];
+}
+
+export interface SelfProfileResponse {
+  id: string;
+  username: string;
+  email: string;
+  rating: number;
+  rank: string;
+  gamesPlayed: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  memberSince: string;
+  lastLogin: string | null;
+  recentGames: RecentGame[];
 }
 
 export interface QueueJoinedEvent {
@@ -74,6 +111,7 @@ export interface GameUpdateEvent {
   state: GameState;
   lastMove: MoveRecord | null;
   flipped: [number, number][];
+  remainingTime?: number;
 }
 
 export interface GameOverEvent {

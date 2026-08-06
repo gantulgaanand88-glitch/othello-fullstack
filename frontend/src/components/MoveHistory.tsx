@@ -28,7 +28,7 @@ export function MoveHistory({ moves }: MoveHistoryProps) {
         </span>
       </div>
 
-      <div ref={scrollRef} className="max-h-80 space-y-1.5 overflow-y-auto pr-1 scrollbar-thin">
+      <div ref={scrollRef} className="max-h-80 space-y-1.5 overflow-y-auto pr-1">
         {moves.length === 0 ? (
           <p className="py-4 text-center text-sm text-gray-500">Moves will appear here once the match begins.</p>
         ) : null}

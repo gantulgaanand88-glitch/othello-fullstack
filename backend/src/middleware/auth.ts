@@ -7,16 +7,33 @@ export interface AuthenticatedRequest extends Request {
 
 interface JwtPayload {
   userId: string;
+  isGuest: boolean;
 }
 
-export function signAuthToken(userId: string): string {
+/**
+ * Validate that the JWT_SECRET environment variable exists and is at least 32 characters.
+ * Call this at startup before accepting connections.
+ */
+export function validateJwtSecret(): void {
   const secret = process.env.JWT_SECRET;
 
   if (!secret) {
     throw new Error('JWT_SECRET is not configured.');
   }
 
-  return jwt.sign({ userId }, secret, { expiresIn: '7d' });
+  if (secret.length < 32) {
+    throw new Error('JWT_SECRET must be at least 32 characters long.');
+  }
+}
+
+export function signAuthToken(userId: string, isGuest = false): string {
+  const secret = process.env.JWT_SECRET;
+
+  if (!secret) {
+    throw new Error('JWT_SECRET is not configured.');
+  }
+
+  return jwt.sign({ userId, isGuest }, secret, { algorithm: 'HS256', expiresIn: '7d' });
 }
 
 export function verifyAuthToken(token: string): JwtPayload {
@@ -26,7 +43,7 @@ export function verifyAuthToken(token: string): JwtPayload {
     throw new Error('JWT_SECRET is not configured.');
   }
 
-  return jwt.verify(token, secret) as JwtPayload;
+  return jwt.verify(token, secret, { algorithms: ['HS256'] }) as JwtPayload;
 }
 
 export function authMiddleware(

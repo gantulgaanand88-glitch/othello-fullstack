@@ -1,109 +1,73 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense } from 'react';
 import { Route, Routes } from 'react-router-dom';
 
 import Navbar from './components/Navbar';
-import { AuthModal } from './components/AuthModal';
-import LandingPage from './pages/LandingPage';
-import GamePage from './pages/GamePage';
-import LeaderboardPage from './pages/LeaderboardPage';
-import { setAuthToken } from './services/api';
-import type { AuthUser } from './types';
-import type { AuthMode, AuthModalState, StoredAuth } from './components/AuthModal';
+import AuthModal from './components/AuthModal';
+import CookieConsent from './components/CookieConsent';
+import { useAuth } from './context/AuthContext';
 
-const AUTH_STORAGE_KEY = 'othello-auth';
+// Lazy loading pages for performance and modularity
+const LandingPage = lazy(() => import('./pages/LandingPage'));
+const GamePage = lazy(() => import('./pages/GamePage'));
+const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage'));
+const PrivacyPolicyPage = lazy(() => import('./pages/PrivacyPolicyPage'));
+const TermsPage = lazy(() => import('./pages/TermsPage'));
+const HistoryPage = lazy(() => import('./pages/HistoryPage'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const SpectatorPage = lazy(() => import('./pages/SpectatorPage'));
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
-function isTokenExpired(token: string): boolean {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    // Expired if less than 60 seconds remaining
-    return payload.exp * 1000 < Date.now() + 60_000;
-  } catch {
-    return true;
-  }
+// A loading spinner for lazy-loaded route Suspense fallback
+function LoadingFallback() {
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="relative w-9 h-9">
+        <div className="absolute inset-0 rounded-full border border-border" />
+        <div className="absolute inset-0 rounded-full border border-transparent border-t-gold animate-spin-slow" />
+      </div>
+    </div>
+  );
 }
 
 function App() {
-  const [auth, setAuth] = useState<StoredAuth | null>(null);
-  const [modalState, setModalState] = useState<AuthModalState>({ isOpen: false, mode: 'login' });
-
-  useEffect(() => {
-    const stored = window.localStorage.getItem(AUTH_STORAGE_KEY);
-
-    if (!stored) {
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(stored) as StoredAuth;
-
-      if (isTokenExpired(parsed.token)) {
-        window.localStorage.removeItem(AUTH_STORAGE_KEY);
-        return;
-      }
-
-      setAuth(parsed);
-      setAuthToken(parsed.token);
-    } catch {
-      window.localStorage.removeItem(AUTH_STORAGE_KEY);
-    }
-  }, []);
-
-  const user = auth?.user ?? null;
-  const token = auth?.token ?? null;
-
-  const openLogin = (mode: AuthMode = 'login') => {
-    setModalState({ isOpen: true, mode });
-  };
-
-  const handleAuthSuccess = (payload: StoredAuth) => {
-    setAuth(payload);
-    setAuthToken(payload.token);
-    window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
-    setModalState((current) => ({ ...current, isOpen: false }));
-  };
-
-  const handleLogout = () => {
-    setAuth(null);
-    setAuthToken(null);
-    window.localStorage.removeItem(AUTH_STORAGE_KEY);
-  };
-
-  const handleUserUpdate = (nextUser: AuthUser) => {
-    if (!token) {
-      return;
-    }
-
-    const nextAuth = { token, user: nextUser };
-    setAuth(nextAuth);
-    window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextAuth));
-  };
+  const {
+    user,
+    isAuthModalOpen,
+    authModalMode,
+    login,
+    closeAuthModal,
+    openAuthModal,
+    logout
+  } = useAuth();
 
   return (
-    <div className="min-h-screen">
-      <Navbar user={user} onLogin={() => openLogin('login')} onLogout={handleLogout} />
+    <div className="min-h-dvh bg-base text-ink flex flex-col">
+      <Navbar />
 
-      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <Routes>
-          <Route path="/" element={<LandingPage user={user} onOpenAuth={openLogin} />} />
-          <Route
-            path="/game"
-            element={
-              <GamePage
-                user={user}
-                token={token}
-                onOpenAuth={openLogin}
-                onUserUpdate={handleUserUpdate}
-              />
-            }
-          />
-          <Route path="/leaderboard" element={<LeaderboardPage />} />
-        </Routes>
+      <main className="flex-grow">
+        <Suspense fallback={<LoadingFallback />}>
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/game" element={<GamePage />} />
+            <Route path="/leaderboard" element={<LeaderboardPage />} />
+            <Route path="/privacy" element={<PrivacyPolicyPage />} />
+            <Route path="/terms" element={<TermsPage />} />
+            <Route path="/history" element={<HistoryPage />} />
+            <Route path="/profile/:username" element={<ProfilePage />} />
+            <Route path="/spectate" element={<SpectatorPage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </Suspense>
       </main>
 
+      {/* Cookie consent banner */}
+      <CookieConsent />
+
+      {/* Modal is mounted globally and managed via context */}
       <AuthModal
-        state={modalState}
-        onClose={() => setModalState((current) => ({ ...current, isOpen: false }))}
-        onSuccess={handleAuthSuccess}
+        state={{ isOpen: isAuthModalOpen, mode: authModalMode }}
+        onClose={closeAuthModal}
+        onSuccess={(payload) => login(payload)}
       />
     </div>
   );

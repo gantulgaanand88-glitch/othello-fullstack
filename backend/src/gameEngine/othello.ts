@@ -165,12 +165,15 @@ export function calculateScore(board: Board): { black: number; white: number } {
   return { black, white };
 }
 
-export function checkGameOver(board: Board): {
+export function checkGameOver(
+  board: Board,
+  precomputed?: { blackHasMoves: boolean; whiteHasMoves: boolean },
+): {
   isOver: boolean;
   winner: Player | 'draw' | null;
 } {
-  const blackHasMoves = hasValidMoves(board, 'black');
-  const whiteHasMoves = hasValidMoves(board, 'white');
+  const blackHasMoves = precomputed?.blackHasMoves ?? hasValidMoves(board, 'black');
+  const whiteHasMoves = precomputed?.whiteHasMoves ?? hasValidMoves(board, 'white');
 
   if (!isBoardFull(board) && (blackHasMoves || whiteHasMoves)) {
     return { isOver: false, winner: null };
@@ -197,6 +200,15 @@ export function processMove(
   flipped: [number, number][];
   valid: boolean;
 } {
+  // Validate move coordinates
+  if (
+    typeof row !== 'number' || typeof col !== 'number' ||
+    !Number.isInteger(row) || !Number.isInteger(col) ||
+    row < 0 || row > 7 || col < 0 || col > 7
+  ) {
+    return { newState: state, flipped: [], valid: false };
+  }
+
   if (state.gameStatus !== 'playing') {
     return {
       newState: state,
@@ -229,7 +241,11 @@ export function processMove(
     nextLegalMoves = currentPlayerLegalMoves;
   }
 
-  const gameOver = checkGameOver(updatedBoard);
+  // Pass precomputed legal moves to avoid recomputing
+  const gameOver = checkGameOver(updatedBoard, {
+    blackHasMoves: opponent === 'black' ? opponentLegalMoves.length > 0 : currentPlayerLegalMoves.length > 0,
+    whiteHasMoves: opponent === 'white' ? opponentLegalMoves.length > 0 : currentPlayerLegalMoves.length > 0,
+  });
   const newState: GameState = {
     board: updatedBoard,
     currentPlayer: nextPlayer,
