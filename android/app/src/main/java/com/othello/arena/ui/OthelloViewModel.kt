@@ -208,6 +208,24 @@ class OthelloViewModel(private val repository: OthelloRepository) : ViewModel() 
         _uiState.update { it.copy(destination = Destination.HOME, queueJoinedAt = null, isLoading = false) }
       is RealtimeEvent.GameFound -> showGame(event.payload)
       is RealtimeEvent.GameResumed -> showGame(event.payload, "Game reconnected.")
+      is RealtimeEvent.GameRejoined ->
+        _uiState.update { state ->
+          val currentGame = state.game
+          if (currentGame == null || currentGame.gameId != event.payload.gameId) {
+            state.copy(message = "The game reconnected, but its local state was unavailable.")
+          } else {
+            state.copy(
+              destination = Destination.GAME,
+              game =
+                currentGame.copy(
+                  yourColor = event.payload.yourColor,
+                  state = event.payload.state,
+                  opponentReconnectDeadline = null,
+                ),
+              message = "Game reconnected.",
+            )
+          }
+        }
       is RealtimeEvent.GameUpdated ->
         _uiState.update { state ->
           state.copy(
@@ -258,7 +276,12 @@ class OthelloViewModel(private val repository: OthelloRepository) : ViewModel() 
         _uiState.update { it.copy(destination = Destination.HOME, privateRoomCode = null, isLoading = false) }
       is RealtimeEvent.OpponentDisconnected ->
         _uiState.update { state ->
-          state.copy(game = state.game?.copy(opponentReconnectDeadline = event.payload.reconnectDeadline))
+          state.copy(
+            game =
+              state.game?.copy(
+                opponentReconnectDeadline = event.payload.reconnectDeadline ?: System.currentTimeMillis() + 30_000,
+              ),
+          )
         }
       RealtimeEvent.OpponentReconnected ->
         _uiState.update { state ->

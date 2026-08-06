@@ -108,9 +108,9 @@ fun HomeScreen(
             modifier = Modifier.fillMaxWidth().padding(top = 18.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
           ) {
-            StatTile("RATING", user.rating.toString(), Modifier.weight(1f))
-            StatTile("RANK", user.rank, Modifier.weight(1f))
-            StatTile("WINS", user.wins.toString(), Modifier.weight(1f))
+            StatTile("RATING", user.rating.toString(), Modifier.weight(0.85f))
+            StatTile("RANK", user.rank, Modifier.weight(1.3f))
+            StatTile("WINS", user.wins.toString(), Modifier.weight(0.85f))
           }
         }
       }
@@ -191,7 +191,7 @@ private fun StatTile(label: String, value: String, modifier: Modifier = Modifier
       maxLines = 1,
       overflow = TextOverflow.Ellipsis,
       fontWeight = FontWeight.Bold,
-      fontSize = 17.sp,
+      fontSize = if (value.length > 9) 13.sp else 17.sp,
     )
   }
 }

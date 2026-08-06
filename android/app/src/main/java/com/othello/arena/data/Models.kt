@@ -109,6 +109,14 @@ data class GameFoundEvent(
 )
 
 @Serializable
+data class GameRejoinedEvent(
+  val gameId: String,
+  val yourColor: PlayerColor,
+  val state: GameState,
+  val remainingTime: Long? = null,
+)
+
+@Serializable
 data class GameUpdateEvent(
   val state: GameState,
   val lastMove: MoveRecord? = null,
@@ -131,7 +139,11 @@ data class GameOverEvent(
 
 @Serializable data class InvalidMoveEvent(val reason: String)
 
-@Serializable data class OpponentDisconnectedEvent(val reconnectDeadline: Long)
+@Serializable
+data class OpponentDisconnectedEvent(
+  val userId: String? = null,
+  val reconnectDeadline: Long? = null,
+)
 
 data class UserSession(val token: String, val user: AuthUser)
 

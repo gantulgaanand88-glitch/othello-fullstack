@@ -99,6 +99,7 @@ const STALE_GAME_CLEANUP_MS = 30 * 60_000; // 30 minutes
 const STALE_ROOM_CLEANUP_MS = 15 * 60_000; // 15 minutes
 const CLEANUP_INTERVAL_MS = 60_000; // Run cleanup every minute
 const MOVE_TIMEOUT_MS = 5 * 60_000; // 5 minutes per move
+
 export const matchmakingQueue: QueueEntry[] = [];
 export const activeGames = new Map<string, ActiveGame>();
 export const socketToGame = new Map<string, string>();
@@ -429,6 +430,7 @@ async function finishGame(
   }
 
   clearMoveTimer(activeGame);
+
   activeGame.status = status;
   activeGame.state = {
     ...activeGame.state,
