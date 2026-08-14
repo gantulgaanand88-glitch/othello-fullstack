@@ -1,0 +1,20 @@
+{
+  "name": "othello-arena-platform",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "typecheck": "npm --prefix web run typecheck",
+    "test:visual": "node tests/visual-smoke.mjs",
+    "test:worker": "node tests/worker-smoke.mjs",
+    "test:budget": "node tests/performance-budget.mjs",
+    "test:engine": "cargo test -p othello-engine -p arena-protocol",
+    "worker:dev": "wrangler dev --config workers/arena/wrangler.jsonc",
+    "worker:deploy": "wrangler deploy --config workers/arena/wrangler.jsonc"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1",
+    "wrangler": "4.123.0"
+  }
+}

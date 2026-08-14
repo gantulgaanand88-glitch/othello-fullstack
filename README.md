@@ -1,5 +1,7 @@
 # Othello (Reversi) Real-Time Multiplayer Game
 
+> **Web rewrite:** The replacement Cloudflare/Rust web platform now lives in [`web-platform/`](web-platform/README.md). The legacy `frontend/` and `backend/` remain in place only so the native Kotlin Android application keeps working during the migration. New web development should target `web-platform`; do not point Android at it until the separate mobile migration is planned.
+
 Welcome to the **Full-Stack Othello** project! This is a real-time multiplayer implementation of the classic board game Othello (also known as Reversi). 
 
 ##  Project Overview
@@ -69,6 +71,17 @@ When a game finishes, the server calculates the new Elo ratings for both players
 ---
 
 ##  Running the Project Locally
+
+### Run the replacement web client
+
+```bash
+cd web-platform
+npm install
+npm --prefix web install
+npm run dev
+```
+
+The new client runs at `http://127.0.0.1:4173`. See [`web-platform/README.md`](web-platform/README.md) for Rust Worker builds, D1 migrations, workerd tests, and Cloudflare provisioning.
 
 ### Prerequisites
 - Node.js (v18+)

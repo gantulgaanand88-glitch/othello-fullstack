@@ -1,0 +1,10 @@
+node_modules/
+web/node_modules/
+web/dist/
+web/devserver*.log
+output/
+workers/arena/build/
+target/
+.wrangler/
+!docs/
+!docs/**
