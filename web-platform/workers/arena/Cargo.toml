@@ -1,0 +1,17 @@
+[package]
+name = "arena-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+arena-protocol = { path = "../../crates/arena-protocol" }
+othello-engine = { path = "../../crates/othello-engine" }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10.9"
+worker = { version = "0.8.5", features = ["d1", "queue"] }
+uuid = { version = "1.24.0", features = ["js", "v4"] }

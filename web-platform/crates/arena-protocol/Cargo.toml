@@ -1,0 +1,12 @@
+[package]
+name = "arena-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+othello-engine = { path = "../othello-engine" }
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
