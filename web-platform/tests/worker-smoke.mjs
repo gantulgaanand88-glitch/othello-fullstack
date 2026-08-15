@@ -60,7 +60,8 @@ try {
   });
   assert.equal(logout.status, 200);
   const revoked = await miniflare.dispatchFetch('http://arena.test/api/me', { headers: { Cookie: cookie } });
-  assert.equal(revoked.status, 401);
+  assert.equal(revoked.status, 200);
+  assert.equal((await revoked.json()).user, null);
 
   const rankings = await miniflare.dispatchFetch('http://arena.test/api/rankings?pool=rapid');
   assert.equal(rankings.status, 200);

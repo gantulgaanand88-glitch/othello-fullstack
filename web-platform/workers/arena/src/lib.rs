@@ -53,7 +53,24 @@ struct PublicUser {
 
 #[derive(Debug, Serialize)]
 struct SessionResponse {
-    user: PublicUser,
+    user: Option<PublicUser>,
+}
+
+fn websocket_upgrade_response(req: &Request, websocket: WebSocket) -> Result<Response> {
+    let headers = Headers::new();
+    let expected_protocol = format!("othello.v{PROTOCOL_VERSION}");
+    if req
+        .headers()
+        .get("Sec-WebSocket-Protocol")?
+        .is_some_and(|protocols| {
+            protocols
+                .split(',')
+                .any(|protocol| protocol.trim() == expected_protocol)
+        })
+    {
+        headers.set("Sec-WebSocket-Protocol", &expected_protocol)?;
+    }
+    Ok(Response::from_websocket(websocket)?.with_headers(headers))
 }
 
 #[event(fetch, respond_with_errors)]
@@ -115,13 +132,13 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .run()
         .await?;
         let mut response = Response::from_json(&SessionResponse {
-            user: PublicUser {
+            user: Some(PublicUser {
                 id: user_id,
                 handle: handle.clone(),
                 display_name: handle,
                 country_code: None,
                 title: None,
-            },
+            }),
         })?;
         response.headers_mut().set(
             "Set-Cookie",
@@ -137,7 +154,7 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             return Response::error("Method not allowed", 405);
         }
         let Some(token) = session_cookie(&req)? else {
-            return Response::error("Authentication required", 401);
+            return Response::from_json(&SessionResponse { user: None });
         };
         let now = Date::now().as_millis() as i64;
         let db = env.d1("DB")?;
@@ -152,8 +169,8 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             .first::<PublicUser>(None)
             .await?
         {
-            Some(user) => Response::from_json(&SessionResponse { user }),
-            None => Response::error("Authentication required", 401),
+            Some(user) => Response::from_json(&SessionResponse { user: Some(user) }),
+            None => Response::from_json(&SessionResponse { user: None }),
         };
     }
 
@@ -696,7 +713,7 @@ impl DurableObject for GameRoom {
         Self::send(&pair.server, &ServerMessage::Snapshot(self.snapshot()?));
         self.schedule_alarm().await?;
 
-        Response::from_websocket(pair.client)
+        websocket_upgrade_response(&req, pair.client)
     }
 
     async fn websocket_message(
@@ -924,12 +941,12 @@ impl DurableObject for GameRoom {
 
     async fn websocket_close(
         &self,
-        ws: WebSocket,
-        code: usize,
-        reason: String,
+        _ws: WebSocket,
+        _code: usize,
+        _reason: String,
         _was_clean: bool,
     ) -> Result<()> {
-        ws.close(Some(code.min(u16::MAX as usize) as u16), Some(reason))
+        Ok(())
     }
 
     async fn alarm(&self) -> Result<Response> {
@@ -1106,7 +1123,7 @@ impl DurableObject for Lobby {
                 connection_id,
             },
         );
-        Response::from_websocket(pair.client)
+        websocket_upgrade_response(&req, pair.client)
     }
 
     async fn websocket_message(
@@ -1298,14 +1315,14 @@ impl DurableObject for Lobby {
     async fn websocket_close(
         &self,
         ws: WebSocket,
-        code: usize,
-        reason: String,
+        _code: usize,
+        _reason: String,
         _was_clean: bool,
     ) -> Result<()> {
         if let Ok(attachment) = Self::attachment(&ws) {
             self.remove_connection(&attachment.connection_id)?;
         }
-        ws.close(Some(code.min(u16::MAX as usize) as u16), Some(reason))
+        Ok(())
     }
 }
 

@@ -5,7 +5,7 @@
   "compatibility_date": "2026-08-14",
   "workers_dev": true,
   "build": {
-    "command": "worker-build --release --no-panic-recovery"
+    "command": "node scripts/build-worker.mjs"
   },
   "durable_objects": {
     "bindings": [
@@ -22,21 +22,15 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "othello-arena-local",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_name": "othello-arena-prod",
+      "database_id": "51404fb1-50f2-4c2a-bd7e-90a76d58fea5",
       "migrations_dir": "migrations"
     }
   ],
   "kv_namespaces": [
     {
       "binding": "SESSION_CACHE",
-      "id": "00000000000000000000000000000000"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "ARCHIVES",
-      "bucket_name": "othello-game-archives"
+      "id": "d74e3f4063fc4297a104477a9abf0103"
     }
   ],
   "queues": {

@@ -7,12 +7,11 @@ export interface ArenaUser {
 }
 
 interface SessionResponse {
-  user: ArenaUser;
+  user: ArenaUser | null;
 }
 
 async function sessionRequest(path: string, init?: RequestInit): Promise<ArenaUser | null> {
   const response = await fetch(path, { credentials: 'include', ...init });
-  if (response.status === 401) return null;
   if (!response.ok) throw new Error(`Session request failed (${response.status})`);
   return ((await response.json()) as SessionResponse).user;
 }
