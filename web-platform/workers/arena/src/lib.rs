@@ -300,6 +300,10 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 struct SocketAttachment {
     connection_id: String,
     role: String,
+    #[serde(default)]
+    rate_window_started_at: u64,
+    #[serde(default)]
+    rate_message_count: u16,
 }
 
 #[derive(Debug, Deserialize)]
@@ -562,6 +566,21 @@ impl GameRoom {
             .ok_or_else(|| Error::RustError("missing websocket attachment".into()))
     }
 
+    fn allow_message(ws: &WebSocket) -> Result<bool> {
+        let Some(mut attachment) = ws.deserialize_attachment::<SocketAttachment>()? else {
+            return Ok(false);
+        };
+        let now = Date::now().as_millis();
+        if now.saturating_sub(attachment.rate_window_started_at) >= 10_000 {
+            attachment.rate_window_started_at = now;
+            attachment.rate_message_count = 0;
+        }
+        attachment.rate_message_count = attachment.rate_message_count.saturating_add(1);
+        let allowed = attachment.rate_message_count <= 80;
+        ws.serialize_attachment(attachment)?;
+        Ok(allowed)
+    }
+
     fn role_for_ticket(&self, req: &Request) -> Result<Option<&'static str>> {
         let ticket = req
             .url()?
@@ -762,6 +781,8 @@ impl DurableObject for GameRoom {
         pair.server.serialize_attachment(SocketAttachment {
             connection_id: connection_id.clone(),
             role: role.into(),
+            rate_window_started_at: Date::now().as_millis(),
+            rate_message_count: 0,
         })?;
         self.state.accept_web_socket(&pair.server);
         Self::send(
@@ -794,6 +815,18 @@ impl DurableObject for GameRoom {
             );
             return Ok(());
         };
+
+        if !Self::allow_message(&ws)? {
+            Self::send(
+                &ws,
+                &ServerMessage::Error {
+                    code: "rate_limited".into(),
+                    message: "Too many realtime commands. Slow down.".into(),
+                    command_id: None,
+                },
+            );
+            return Ok(());
+        }
 
         if text.len() > 16_384 {
             Self::send(
@@ -1215,6 +1248,8 @@ impl DurableObject for Lobby {
         pair.server.serialize_attachment(SocketAttachment {
             connection_id: connection_id.clone(),
             role: "lobby".into(),
+            rate_window_started_at: Date::now().as_millis(),
+            rate_message_count: 0,
         })?;
         GameRoom::send(
             &pair.server,
@@ -1243,6 +1278,17 @@ impl DurableObject for Lobby {
             );
             return Ok(());
         };
+        if !GameRoom::allow_message(&ws)? {
+            GameRoom::send(
+                &ws,
+                &ServerMessage::Error {
+                    code: "rate_limited".into(),
+                    message: "Too many realtime commands. Slow down.".into(),
+                    command_id: None,
+                },
+            );
+            return Ok(());
+        }
         if text.len() > 16_384 {
             GameRoom::send(
                 &ws,

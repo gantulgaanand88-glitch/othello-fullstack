@@ -59,6 +59,7 @@ export function AppShell({ children, user, authBusy, edgeHealthy, onGuestSession
         <p>Independent, privacy-first competitive Reversi.</p>
         <nav aria-label="Legal and service links">
           <a href="/api/health">Status</a>
+          <a href="https://github.com/gantulgaanand88-glitch/othello-fullstack">Contact</a>
           <NavLink to="/privacy">Privacy</NavLink>
           <NavLink to="/terms">Terms</NavLink>
           <NavLink to="/fair-play">Fair play</NavLink>

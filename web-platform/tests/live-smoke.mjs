@@ -86,6 +86,7 @@ await Promise.all([
 const state = JSON.parse(await first.evaluate(() => window.render_game_to_text()));
 assert.equal(state.turn, 'white');
 assert.deepEqual(state.score, { black: 4, white: 1 });
+await new Promise((resolve) => setTimeout(resolve, 500));
 await first.screenshot({ path: path.join(artifacts, 'live-game.png'), fullPage: true });
 assert.deepEqual(errors, []);
 

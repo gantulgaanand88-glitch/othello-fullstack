@@ -9,6 +9,7 @@ This document records controls that exist today and gaps that must be closed bef
 - Authentication responses are marked `no-store`.
 - WebSocket handshakes require an exact same-origin `Origin` value. State-changing authentication requests reject a mismatched origin.
 - WebSocket messages are JSON-only and limited to 16 KiB server-side. Browser clients also reject oversized responses.
+- Each realtime connection is limited to 80 commands per ten-second window before commands are rejected.
 - Static responses apply a restrictive Content Security Policy, clickjacking protection, MIME sniffing protection, a permissions policy, and conservative referrer behavior.
 - Durable Objects serialize game state, enforce seat ownership, and persist revisions and clocks in SQLite storage.
 - Matchmaking issues high-entropy, game-scoped seat credentials. A game ID alone creates a spectator connection and cannot claim a player color; the browser keeps the credential out of the navigation request by carrying it in the URL fragment.
