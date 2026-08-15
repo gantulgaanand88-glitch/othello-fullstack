@@ -44,6 +44,8 @@ pub enum ServerMessage {
     Connected {
         protocol: u16,
         connection_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<Player>,
     },
     Pong {
         sent_at: u64,
@@ -63,6 +65,7 @@ pub enum ServerMessage {
     },
     MatchFound {
         game_id: String,
+        ticket: String,
         color: Player,
         opponent: PlayerSummary,
         snapshot: GameSnapshot,

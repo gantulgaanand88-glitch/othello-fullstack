@@ -1,5 +1,6 @@
 import type { ClientMessage, GameSnapshot, ServerMessage } from './protocol';
 import { isServerMessage, PROTOCOL_VERSION } from './protocol';
+import type { Player } from '../game/types';
 
 export type ConnectionState = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed';
 
@@ -7,6 +8,7 @@ export interface ArenaSocketHandlers {
   onState?: (state: ConnectionState) => void;
   onMessage?: (message: ServerMessage) => void;
   onSnapshot?: (snapshot: GameSnapshot) => void;
+  onRole?: (role: Player | null) => void;
   onError?: (message: string) => void;
 }
 
@@ -34,7 +36,9 @@ export class ArenaSocket {
   constructor(gameId: string, handlers: ArenaSocketHandlers = {}, origin = import.meta.env.VITE_ARENA_ORIGIN ?? window.location.origin) {
     this.gameId = gameId;
     this.handlers = handlers;
-    this.endpoint = `${websocketOrigin(origin)}/ws/game/${encodeURIComponent(gameId)}`;
+    const ticket = new URLSearchParams(window.location.hash.slice(1)).get('ticket');
+    const credentials = ticket ? `?ticket=${encodeURIComponent(ticket)}` : '';
+    this.endpoint = `${websocketOrigin(origin)}/ws/game/${encodeURIComponent(gameId)}${credentials}`;
   }
 
   connect() {
@@ -60,6 +64,7 @@ export class ArenaSocket {
         this.handlers.onMessage?.(message);
         if (message.type === 'snapshot') this.acceptSnapshot(message.payload);
         if (message.type === 'game_finished') this.acceptSnapshot(message.payload.snapshot);
+        if (message.type === 'connected') this.handlers.onRole?.(message.payload.role ?? null);
         if (message.type === 'connected' && message.payload.protocol !== PROTOCOL_VERSION) {
           this.handlers.onError?.(`Protocol mismatch: server v${message.payload.protocol}, client v${PROTOCOL_VERSION}`);
           this.close();

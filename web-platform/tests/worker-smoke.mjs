@@ -49,7 +49,15 @@ try {
   assert.match(guestBody.user.handle, /^Guest[0-9a-f]{8}$/);
   const setCookie = guest.headers.get('set-cookie');
   assert.match(setCookie, /HttpOnly/);
-  assert.match(setCookie, /SameSite=Lax/);
+  assert.match(setCookie, /^__Host-reversi_session=/);
+  assert.match(setCookie, /SameSite=Strict/);
+  assert.match(setCookie, /Max-Age=604800/);
+  assert.equal(guest.headers.get('cache-control'), 'no-store');
+  const crossSiteGuest = await miniflare.dispatchFetch('http://arena.test/api/auth/guest', {
+    method: 'POST',
+    headers: { Origin: 'https://attacker.test' },
+  });
+  assert.equal(crossSiteGuest.status, 403);
   const cookie = setCookie.split(';', 1)[0];
   const me = await miniflare.dispatchFetch('http://arena.test/api/me', { headers: { Cookie: cookie } });
   assert.equal(me.status, 200);
@@ -73,7 +81,14 @@ try {
   const local = await miniflare.ready;
   const gameUrl = new URL('/ws/game/smoke-game', local);
   gameUrl.protocol = 'ws:';
-  const socket = new WebSocket(gameUrl);
+  const forbiddenSocket = new WebSocket(gameUrl, { origin: 'https://attacker.test' });
+  const forbiddenStatus = await new Promise((resolve) => {
+    forbiddenSocket.once('unexpected-response', (_request, response) => resolve(response.statusCode));
+    forbiddenSocket.once('error', () => undefined);
+  });
+  assert.equal(forbiddenStatus, 403);
+
+  const socket = new WebSocket(gameUrl, { origin: local.origin });
   const inbox = [];
   const waiters = [];
   socket.on('message', (data) => {
@@ -105,34 +120,26 @@ try {
   });
   const connected = await waitFor((message) => message.type === 'connected');
   assert.equal(connected.payload.protocol, 1);
+  assert.equal(connected.payload.role ?? null, null);
   const initialGame = await waitFor((message) => message.type === 'snapshot' && message.payload.revision === 0);
   assert.equal(initialGame.payload.game_id, 'smoke-game');
+
+  socket.send('x'.repeat(16_385));
+  const oversized = await waitFor((message) => message.type === 'error' && message.payload.code === 'message_too_large');
+  assert.equal(oversized.payload.message, 'Messages are limited to 16 KiB.');
 
   socket.send(JSON.stringify({
     type: 'move',
     payload: { square: 19, command_id: 'smoke-move-1' },
   }));
-  const moved = await waitFor((message) => message.type === 'snapshot' && message.payload.revision === 1);
-  assert.equal(moved.payload.turn, 'white');
-  assert.equal(moved.payload.black_score, 4);
-  assert.equal(moved.payload.white_score, 1);
-  assert.equal(moved.payload.last_move.square, 19);
-  assert.equal(moved.payload.clock.running, 'white');
-  assert.ok(moved.payload.clock.black_ms <= 300_000);
-  assert.ok(moved.payload.clock.server_now > 0);
-
-  socket.send(JSON.stringify({
-    type: 'move',
-    payload: { square: 18, command_id: 'smoke-move-out-of-turn' },
-  }));
-  const rejected = await waitFor((message) => message.type === 'error' && message.payload.command_id === 'smoke-move-out-of-turn');
+  const rejected = await waitFor((message) => message.type === 'error' && message.payload.command_id === 'smoke-move-1');
   assert.equal(rejected.payload.code, 'not_your_turn');
   socket.close();
 
   const openLobby = async () => {
     const lobbyUrl = new URL('/ws/lobby', local);
     lobbyUrl.protocol = 'ws:';
-    const lobby = new WebSocket(lobbyUrl);
+    const lobby = new WebSocket(lobbyUrl, { origin: local.origin });
     const messages = [];
     const listeners = [];
     lobby.on('message', (data) => {
@@ -172,6 +179,8 @@ try {
     secondLobby.next((message) => message.type === 'match_found'),
   ]);
   assert.equal(firstMatch.payload.game_id, secondMatch.payload.game_id);
+  assert.notEqual(firstMatch.payload.ticket, secondMatch.payload.ticket);
+  assert.ok(firstMatch.payload.ticket.length >= 64);
   assert.equal(firstMatch.payload.color, 'white');
   assert.equal(secondMatch.payload.color, 'black');
   const gameRecord = await miniflare.dispatchFetch(`http://arena.test/api/games/${firstMatch.payload.game_id}`);
@@ -181,8 +190,9 @@ try {
   assert.equal(gameRecordBody.rated, true);
 
   const pairedGameUrl = new URL(`/ws/game/${firstMatch.payload.game_id}`, local);
+  pairedGameUrl.searchParams.set('ticket', secondMatch.payload.ticket);
   pairedGameUrl.protocol = 'ws:';
-  const pairedGameSocket = new WebSocket(pairedGameUrl);
+  const pairedGameSocket = new WebSocket(pairedGameUrl, { origin: local.origin });
   const pairedGameMessages = [];
   pairedGameSocket.on('message', (data) => pairedGameMessages.push(JSON.parse(data.toString())));
   await new Promise((resolve, reject) => {
@@ -200,6 +210,17 @@ try {
   };
   const pairedSnapshot = await waitForPairedGame((message) => message.type === 'snapshot');
   assert.equal(pairedSnapshot.payload.game_id, firstMatch.payload.game_id);
+  const pairedConnected = await waitForPairedGame((message) => message.type === 'connected');
+  assert.equal(pairedConnected.payload.role, 'black');
+  pairedGameSocket.send(JSON.stringify({
+    type: 'move',
+    payload: { square: 19, command_id: 'paired-game-move' },
+  }));
+  const pairedMove = await waitForPairedGame((message) => message.type === 'snapshot' && message.payload.revision === 1);
+  assert.equal(pairedMove.payload.turn, 'white');
+  assert.equal(pairedMove.payload.black_score, 4);
+  assert.equal(pairedMove.payload.white_score, 1);
+  assert.equal(pairedMove.payload.clock.running, 'white');
   pairedGameSocket.send(JSON.stringify({
     type: 'resign',
     payload: { command_id: 'paired-game-resign' },
@@ -215,9 +236,13 @@ try {
   firstLobby.lobby.close();
   secondLobby.lobby.close();
 
-  const botUrl = new URL('/ws/game/bot-6-smoke', local);
+  const botLobby = await openLobby();
+  botLobby.lobby.send(JSON.stringify({ type: 'bot_start', payload: { level: 6, color: 'random' } }));
+  const botMatch = await botLobby.next((message) => message.type === 'match_found');
+  const botUrl = new URL(`/ws/game/${botMatch.payload.game_id}`, local);
+  botUrl.searchParams.set('ticket', botMatch.payload.ticket);
   botUrl.protocol = 'ws:';
-  const botSocket = new WebSocket(botUrl);
+  const botSocket = new WebSocket(botUrl, { origin: local.origin });
   const botMessages = [];
   botSocket.on('message', (data) => botMessages.push(JSON.parse(data.toString())));
   await new Promise((resolve, reject) => {
@@ -244,6 +269,7 @@ try {
   assert.equal(botReply.payload.board.filter(Boolean).length, 6);
   assert.equal(botReply.payload.clock.running, 'black');
   botSocket.close();
+  botLobby.lobby.close();
 
   console.log('Worker smoke tests passed: HTTP/D1 auth, rankings, authoritative clocks and moves, persistence, turn ownership, ranked pairing, and Rust bot reply.');
 } finally {

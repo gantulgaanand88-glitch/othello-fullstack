@@ -75,13 +75,13 @@ export type ClientMessage =
   | { type: 'list_live_games' };
 
 export type ServerMessage =
-  | { type: 'connected'; payload: { protocol: number; connection_id: string } }
+  | { type: 'connected'; payload: { protocol: number; connection_id: string; role?: Player | null } }
   | { type: 'pong'; payload: { sent_at: number } }
   | { type: 'error'; payload: { code: string; message: string; command_id: string | null } }
   | { type: 'queue_joined'; payload: { joined_at: number; mode: QueueMode } }
   | { type: 'queue_left' }
   | { type: 'room_created'; payload: { code: string } }
-  | { type: 'match_found'; payload: { game_id: string; color: Player; opponent: PlayerSummary; snapshot: GameSnapshot } }
+  | { type: 'match_found'; payload: { game_id: string; ticket: string; color: Player; opponent: PlayerSummary; snapshot: GameSnapshot } }
   | { type: 'snapshot'; payload: GameSnapshot }
   | { type: 'game_finished'; payload: { snapshot: GameSnapshot; reason: string } }
   | { type: 'presence'; payload: { user_id: string; online: boolean; reconnect_deadline: number | null } }

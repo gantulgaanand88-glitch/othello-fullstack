@@ -25,8 +25,9 @@ try {
   await desktop.goto(baseUrl, { waitUntil: 'networkidle' });
   await desktop.screenshot({ path: path.join(artifacts, 'landing-desktop.png'), fullPage: true });
   await assert.doesNotReject(() => desktop.getByRole('heading', { level: 1 }).waitFor());
-  assert.match(await desktop.getByRole('heading', { level: 1 }).innerText(), /every move/i);
-  await assert.doesNotReject(() => desktop.getByLabel('Othello Arena home').first().waitFor());
+  assert.match(await desktop.getByRole('heading', { level: 1 }).innerText(), /sixty-four consequences/i);
+  await assert.doesNotReject(() => desktop.getByLabel('Reversi Arena home').first().waitFor());
+  assert.equal((await desktop.locator('body').innerText()).includes('2,418'), false);
 
   await desktop.locator('#start-btn').click();
   await desktop.locator('#quick-match-btn').click();
@@ -48,6 +49,15 @@ try {
   assert.equal(after.lastMove, 19);
   assert.deepEqual(after.score, { black: 4, white: 1 });
   await desktop.screenshot({ path: path.join(artifacts, 'game-after-move.png'), fullPage: true });
+
+  for (const route of ['watch', 'rankings', 'learn', 'privacy', 'terms', 'fair-play']) {
+    await desktop.goto(`${baseUrl}/${route}`, { waitUntil: 'networkidle' });
+    await desktop.screenshot({ path: path.join(artifacts, `${route}-desktop.png`), fullPage: true });
+    assert.equal(await desktop.locator('body').evaluate((body) => body.scrollWidth <= window.innerWidth), true);
+  }
+  await desktop.goto(`${baseUrl}/learn`, { waitUntil: 'networkidle' });
+  await desktop.getByRole('button', { name: /corners and danger/i }).click();
+  await assert.doesNotReject(() => desktop.getByRole('heading', { name: /corners and danger/i }).waitFor());
   await desktop.close();
 
   const mobile = await newPage({ width: 390, height: 844 });

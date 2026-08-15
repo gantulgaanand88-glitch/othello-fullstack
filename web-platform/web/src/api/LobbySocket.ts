@@ -50,7 +50,7 @@ export class LobbySocket {
           this.close();
         }
         if (message.type === 'error') this.handlers.onError?.(message.payload.message);
-        if (message.type === 'match_found') this.pending = null;
+        if (message.type === 'match_found' || message.type === 'queue_left' || message.type === 'room_created' || message.type === 'live_games') this.pending = null;
       } catch {
         this.handlers.onError?.('The lobby sent an unreadable message.');
       }
@@ -70,6 +70,10 @@ export class LobbySocket {
     this.sendOrRemember({ type: 'queue_join', payload: { mode } });
   }
 
+  leaveQueue() {
+    this.sendOrRemember({ type: 'queue_leave' });
+  }
+
   startBot(level: number, color: ColorChoice = 'random') {
     this.sendOrRemember({ type: 'bot_start', payload: { level, color } });
   }
@@ -80,6 +84,10 @@ export class LobbySocket {
 
   joinRoom(code: string) {
     this.sendOrRemember({ type: 'room_join', payload: { code } });
+  }
+
+  listLiveGames() {
+    this.sendOrRemember({ type: 'list_live_games' });
   }
 
   close() {

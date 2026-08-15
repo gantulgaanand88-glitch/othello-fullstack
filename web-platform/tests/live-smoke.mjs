@@ -20,6 +20,11 @@ const opening = await fetch(`${baseUrl}/api/engine/opening`);
 assert.equal(opening.status, 200);
 assert.deepEqual((await opening.json()).legal_moves, [19, 26, 37, 44]);
 
+const home = await fetch(baseUrl);
+assert.equal(home.status, 200);
+assert.match(home.headers.get('content-security-policy') ?? '', /default-src 'self'/);
+assert.equal(home.headers.get('x-content-type-options'), 'nosniff');
+
 const guest = await fetch(`${baseUrl}/api/auth/guest`, { method: 'POST' });
 assert.equal(guest.status, 200);
 const cookie = guest.headers.get('set-cookie')?.split(';', 1)[0];
@@ -57,7 +62,10 @@ const secondGame = new URL(second.url()).searchParams.get('id');
 assert.ok(firstGame);
 assert.equal(firstGame, secondGame);
 
-await Promise.all([first.waitForFunction(() => window.render_game_to_text?.()), second.waitForFunction(() => window.render_game_to_text?.())]);
+await Promise.all([
+  first.waitForFunction(() => JSON.parse(window.render_game_to_text?.() ?? '{}').playerRole),
+  second.waitForFunction(() => JSON.parse(window.render_game_to_text?.() ?? '{}').playerRole),
+]);
 const clickD3 = async (page) => {
   const canvas = page.locator('.game-layout canvas');
   const box = await canvas.boundingBox();
@@ -65,11 +73,10 @@ const clickD3 = async (page) => {
   await canvas.click({ position: { x: (box.width * 3.5) / 8, y: (box.height * 2.5) / 8 } });
 };
 
-await clickD3(first);
-await new Promise((resolve) => setTimeout(resolve, 250));
-if (JSON.parse(await first.evaluate(() => window.render_game_to_text())).lastMove !== 19) {
-  await clickD3(second);
-}
+const firstRole = JSON.parse(await first.evaluate(() => window.render_game_to_text())).playerRole;
+const secondRole = JSON.parse(await second.evaluate(() => window.render_game_to_text())).playerRole;
+assert.deepEqual(new Set([firstRole, secondRole]), new Set(['black', 'white']));
+await clickD3(firstRole === 'black' ? first : second);
 
 await Promise.all([
   first.waitForFunction(() => JSON.parse(window.render_game_to_text()).lastMove === 19, undefined, { timeout: 10_000 }),

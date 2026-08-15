@@ -73,6 +73,23 @@ fn websocket_upgrade_response(req: &Request, websocket: WebSocket) -> Result<Res
     Ok(Response::from_websocket(websocket)?.with_headers(headers))
 }
 
+fn request_origin(req: &Request) -> Result<String> {
+    Ok(req.url()?.origin().ascii_serialization())
+}
+
+fn origin_matches(req: &Request) -> Result<bool> {
+    Ok(req
+        .headers()
+        .get("Origin")?
+        .is_some_and(|origin| origin == request_origin(req).unwrap_or_default()))
+}
+
+fn no_store(mut response: Response) -> Result<Response> {
+    response.headers_mut().set("Cache-Control", "no-store")?;
+    response.headers_mut().set("Pragma", "no-cache")?;
+    Ok(response)
+}
+
 #[event(fetch, respond_with_errors)]
 pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let path = req.path();
@@ -93,6 +110,9 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         if req.method() != Method::Post {
             return Response::error("Method not allowed", 405);
         }
+        if req.headers().has("Origin")? && !origin_matches(&req)? {
+            return Response::error("Forbidden origin", 403);
+        }
         let now = Date::now().as_millis() as i64;
         let user_id = uuid_from_entropy()?;
         let suffix: String = user_id
@@ -104,7 +124,7 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         let session_id = uuid_from_entropy()?;
         let token = format!("{}{}", uuid_from_entropy()?, uuid_from_entropy()?);
         let digest = token_digest(&token);
-        let expires_at = now + 30 * 24 * 60 * 60 * 1000;
+        let expires_at = now + 7 * 24 * 60 * 60 * 1000;
         let db = env.d1("DB")?;
         db.prepare(
             "INSERT INTO users(id, handle, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -143,10 +163,10 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         response.headers_mut().set(
             "Set-Cookie",
             &format!(
-                "arena_session={token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000"
+                "__Host-reversi_session={token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800"
             ),
         )?;
-        return Ok(response);
+        return no_store(response);
     }
 
     if path == "/api/me" {
@@ -154,7 +174,7 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             return Response::error("Method not allowed", 405);
         }
         let Some(token) = session_cookie(&req)? else {
-            return Response::from_json(&SessionResponse { user: None });
+            return no_store(Response::from_json(&SessionResponse { user: None })?);
         };
         let now = Date::now().as_millis() as i64;
         let db = env.d1("DB")?;
@@ -169,14 +189,17 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             .first::<PublicUser>(None)
             .await?
         {
-            Some(user) => Response::from_json(&SessionResponse { user: Some(user) }),
-            None => Response::from_json(&SessionResponse { user: None }),
+            Some(user) => no_store(Response::from_json(&SessionResponse { user: Some(user) })?),
+            None => no_store(Response::from_json(&SessionResponse { user: None })?),
         };
     }
 
     if path == "/api/auth/logout" {
         if req.method() != Method::Post {
             return Response::error("Method not allowed", 405);
+        }
+        if req.headers().has("Origin")? && !origin_matches(&req)? {
+            return Response::error("Forbidden origin", 403);
         }
         if let Some(token) = session_cookie(&req)? {
             env.d1("DB")?
@@ -191,9 +214,9 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         let mut response = Response::empty()?;
         response.headers_mut().set(
             "Set-Cookie",
-            "arena_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
+            "__Host-reversi_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
         )?;
-        return Ok(response);
+        return no_store(response);
     }
 
     if path == "/api/rankings" {
@@ -253,12 +276,18 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         if game_id.is_empty() {
             return Response::error("Missing game id", 400);
         }
+        if !origin_matches(&req)? {
+            return Response::error("Forbidden WebSocket origin", 403);
+        }
         let namespace = env.durable_object("GAME_ROOM")?;
         let stub = namespace.id_from_name(game_id)?.get_stub()?;
         return stub.fetch_with_request(req).await;
     }
 
     if path == "/ws/lobby" {
+        if !origin_matches(&req)? {
+            return Response::error("Forbidden WebSocket origin", 403);
+        }
         let namespace = env.durable_object("LOBBY")?;
         let stub = namespace.id_from_name("global-v1")?.get_stub()?;
         return stub.fetch_with_request(req).await;
@@ -291,6 +320,11 @@ struct StoredMove {
 #[derive(Debug, Deserialize)]
 struct StoredFinish {
     winner: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct StoredSeat {
+    role: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -528,22 +562,27 @@ impl GameRoom {
             .ok_or_else(|| Error::RustError("missing websocket attachment".into()))
     }
 
-    fn available_role(&self) -> &'static str {
-        let mut black = false;
-        let mut white = false;
-        for socket in self.state.get_websockets() {
-            if let Ok(Some(attachment)) = socket.deserialize_attachment::<SocketAttachment>() {
-                black |= attachment.role == "black";
-                white |= attachment.role == "white";
-            }
-        }
-        if !black {
-            "black"
-        } else if !white {
-            "white"
-        } else {
-            "spectator"
-        }
+    fn role_for_ticket(&self, req: &Request) -> Result<Option<&'static str>> {
+        let ticket = req
+            .url()?
+            .query_pairs()
+            .find(|(key, _)| key == "ticket")
+            .map(|(_, value)| value.into_owned());
+        let Some(ticket) = ticket.filter(|value| value.len() <= 160) else {
+            return Ok(None);
+        };
+        let rows: Vec<StoredSeat> = self
+            .sql
+            .exec(
+                "SELECT role FROM game_seats WHERE ticket_digest = ? LIMIT 1",
+                Some(vec![token_digest(&ticket).into()]),
+            )?
+            .to_array()?;
+        Ok(match rows.first().map(|seat| seat.role.as_str()) {
+            Some("black") => Some("black"),
+            Some("white") => Some("white"),
+            _ => None,
+        })
     }
 
     fn record_move(&self, outcome: othello_engine::MoveOutcome, revision: u64) -> Result<()> {
@@ -663,10 +702,32 @@ impl DurableObject for GameRoom {
             None,
         )
         .expect("create game_identity table");
+        sql.exec(
+            "CREATE TABLE IF NOT EXISTS game_seats (\
+                role TEXT PRIMARY KEY CHECK (role IN ('black', 'white')),\
+                ticket_digest TEXT NOT NULL UNIQUE\
+            )",
+            None,
+        )
+        .expect("create game seats table");
         Self { state, sql, env }
     }
 
     async fn fetch(&self, req: Request) -> Result<Response> {
+        if req.path() == "/internal/reserve" {
+            if req.method() != Method::Post {
+                return Response::error("Method not allowed", 405);
+            }
+            for (key, value) in req.url()?.query_pairs() {
+                if matches!(key.as_ref(), "black" | "white") && !value.is_empty() {
+                    self.sql.exec(
+                        "INSERT OR REPLACE INTO game_seats(role, ticket_digest) VALUES (?, ?)",
+                        Some(vec![key.as_ref().into(), token_digest(&value).into()]),
+                    )?;
+                }
+            }
+            return Response::empty();
+        }
         if req.headers().get("Upgrade")?.as_deref() != Some("websocket") {
             return Response::error("Expected a WebSocket upgrade", 426);
         }
@@ -697,7 +758,7 @@ impl DurableObject for GameRoom {
 
         let pair = WebSocketPair::new()?;
         let connection_id = uuid_from_entropy()?;
-        let role = self.available_role();
+        let role = self.role_for_ticket(&req)?.unwrap_or("spectator");
         pair.server.serialize_attachment(SocketAttachment {
             connection_id: connection_id.clone(),
             role: role.into(),
@@ -708,6 +769,7 @@ impl DurableObject for GameRoom {
             &ServerMessage::Connected {
                 protocol: PROTOCOL_VERSION,
                 connection_id,
+                role: parse_player(&role).ok(),
             },
         );
         Self::send(&pair.server, &ServerMessage::Snapshot(self.snapshot()?));
@@ -732,6 +794,18 @@ impl DurableObject for GameRoom {
             );
             return Ok(());
         };
+
+        if text.len() > 16_384 {
+            Self::send(
+                &ws,
+                &ServerMessage::Error {
+                    code: "message_too_large".into(),
+                    message: "Messages are limited to 16 KiB.".into(),
+                    command_id: None,
+                },
+            );
+            return Ok(());
+        }
 
         let message: ClientMessage = match serde_json::from_str(&text) {
             Ok(message) => message,
@@ -1018,12 +1092,17 @@ impl Lobby {
         let first_id = Self::attachment(first)?.connection_id;
         let second_id = Self::attachment(second)?.connection_id;
         let game_id = uuid_from_entropy()?;
+        let black_ticket = format!("{}{}", uuid_from_entropy()?, uuid_from_entropy()?);
+        let white_ticket = format!("{}{}", uuid_from_entropy()?, uuid_from_entropy()?);
+        self.reserve_game(&game_id, &black_ticket, Some(&white_ticket))
+            .await?;
         self.persist_game(&game_id, rated).await?;
         let snapshot = GameSnapshot::from_position(game_id.clone(), 0, Position::new());
         GameRoom::send(
             first,
             &ServerMessage::MatchFound {
                 game_id: game_id.clone(),
+                ticket: black_ticket,
                 color: Player::Black,
                 opponent: Self::guest(&second_id),
                 snapshot: snapshot.clone(),
@@ -1033,11 +1112,32 @@ impl Lobby {
             second,
             &ServerMessage::MatchFound {
                 game_id,
+                ticket: white_ticket,
                 color: Player::White,
                 opponent: Self::guest(&first_id),
                 snapshot,
             },
         );
+        Ok(())
+    }
+
+    async fn reserve_game(
+        &self,
+        game_id: &str,
+        black_ticket: &str,
+        white_ticket: Option<&str>,
+    ) -> Result<()> {
+        let namespace = self.env.durable_object("GAME_ROOM")?;
+        let stub = namespace.id_from_name(game_id)?.get_stub()?;
+        let white = white_ticket.unwrap_or_default();
+        let request = Request::new(
+            &format!("https://game.internal/internal/reserve?black={black_ticket}&white={white}"),
+            Method::Post,
+        )?;
+        let response = stub.fetch_with_request(request).await?;
+        if response.status_code() >= 300 {
+            return Err(Error::RustError("failed to reserve game seats".into()));
+        }
         Ok(())
     }
 
@@ -1121,6 +1221,7 @@ impl DurableObject for Lobby {
             &ServerMessage::Connected {
                 protocol: PROTOCOL_VERSION,
                 connection_id,
+                role: None,
             },
         );
         websocket_upgrade_response(&req, pair.client)
@@ -1142,6 +1243,17 @@ impl DurableObject for Lobby {
             );
             return Ok(());
         };
+        if text.len() > 16_384 {
+            GameRoom::send(
+                &ws,
+                &ServerMessage::Error {
+                    code: "message_too_large".into(),
+                    message: "Messages are limited to 16 KiB.".into(),
+                    command_id: None,
+                },
+            );
+            return Ok(());
+        }
         let message: ClientMessage = match serde_json::from_str(&text) {
             Ok(message) => message,
             Err(error) => {
@@ -1281,11 +1393,14 @@ impl DurableObject for Lobby {
                     return Ok(());
                 }
                 let game_id = format!("bot-{level}-{}", uuid_from_entropy()?);
+                let ticket = format!("{}{}", uuid_from_entropy()?, uuid_from_entropy()?);
+                self.reserve_game(&game_id, &ticket, None).await?;
                 self.persist_game(&game_id, false).await?;
                 GameRoom::send(
                     &ws,
                     &ServerMessage::MatchFound {
                         game_id: game_id.clone(),
+                        ticket,
                         color: Player::Black,
                         opponent: PlayerSummary {
                             id: format!("bot-{level}"),
@@ -1355,7 +1470,7 @@ fn session_cookie(req: &Request) -> Result<Option<String>> {
     let cookie = req.headers().get("Cookie")?.unwrap_or_default();
     Ok(cookie.split(';').find_map(|part| {
         let (name, value) = part.trim().split_once('=')?;
-        (name == "arena_session" && !value.is_empty()).then(|| value.to_string())
+        (name == "__Host-reversi_session" && !value.is_empty()).then(|| value.to_string())
     }))
 }
 
